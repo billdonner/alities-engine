@@ -1,0 +1,228 @@
+import Foundation
+import ArgumentParser
+import Logging
+import AsyncHTTPClient
+import PostgresNIO
+import NIOCore
+import NIOPosix
+
+// MARK: - Run Command (daemon)
+
+struct RunCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "run",
+        abstract: "Start the trivia acquisition daemon"
+    )
+
+    @Option(name: .long, help: "Database host")
+    var dbHost: String = "localhost"
+
+    @Option(name: .long, help: "Database port")
+    var dbPort: Int = 5432
+
+    @Option(name: .long, help: "Database user")
+    var dbUser: String = "trivia"
+
+    @Option(name: .long, help: "Database password")
+    var dbPassword: String = "trivia"
+
+    @Option(name: .long, help: "Database name")
+    var dbName: String = "trivia_db"
+
+    @Option(name: .long, help: "OpenAI API key for AI generation")
+    var openaiKey: String?
+
+    @Option(name: .long, help: "Directory to watch for import files")
+    var importDir: String = "/tmp/trivia-import"
+
+    @Option(name: .long, help: "Seconds between acquisition cycles")
+    var interval: Int = 60
+
+    @Option(name: .long, help: "Questions per batch")
+    var batchSize: Int = 10
+
+    @Flag(name: .long, help: "Disable OpenTriviaDB provider")
+    var noOpentdb: Bool = false
+
+    @Flag(name: .long, help: "Disable TheTriviaAPI provider")
+    var noTriviaapi: Bool = false
+
+    @Flag(name: .long, help: "Disable jService provider")
+    var noJservice: Bool = false
+
+    @Flag(name: .long, help: "Disable AI generation provider")
+    var noAi: Bool = false
+
+    @Flag(name: .long, help: "Disable file import provider")
+    var noFileImport: Bool = false
+
+    @Flag(name: .shortAndLong, help: "Verbose logging")
+    var verbose: Bool = false
+
+    @Flag(name: .long, help: "Simulate without writing to the database")
+    var dryRun: Bool = false
+
+    @Option(name: .long, help: "Write questions to a JSON file instead of the database")
+    var outputFile: String?
+
+    mutating func run() async throws {
+        var logger = Logger(label: "alities-engine")
+        logger.logLevel = verbose ? .debug : .info
+
+        logger.info("Starting Alities Engine Daemon...")
+
+        let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 2)
+        defer { try? eventLoopGroup.syncShutdownGracefully() }
+
+        let httpClient = HTTPClient(eventLoopGroupProvider: .shared(eventLoopGroup))
+        defer { try? httpClient.syncShutdown() }
+
+        var dbService: PostgresService? = nil
+        var connection: PostgresConnection? = nil
+
+        if outputFile == nil && !dryRun {
+            logger.info("Database: \(dbUser)@\(dbHost):\(dbPort)/\(dbName)")
+            logger.info("Connecting to database...")
+            let dbConfig = PostgresConnection.Configuration(
+                host: dbHost, port: dbPort,
+                username: dbUser, password: dbPassword,
+                database: dbName, tls: .disable
+            )
+
+            let conn = try await PostgresConnection.connect(
+                configuration: dbConfig, id: 1, logger: logger
+            )
+            connection = conn
+            logger.info("Database connected")
+            dbService = PostgresService(connection: conn, logger: logger)
+        }
+
+        defer {
+            if let connection { try? connection.close().wait() }
+        }
+
+        let config = DaemonConfig(
+            dbHost: dbHost, dbPort: dbPort,
+            dbUser: dbUser, dbPassword: dbPassword, dbName: dbName,
+            openAIKey: openaiKey ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
+            importDirectory: URL(fileURLWithPath: importDir),
+            cycleIntervalSeconds: interval, providerDelaySeconds: 5,
+            batchSize: batchSize, similarityCheckLimit: 1000,
+            dryRun: dryRun,
+            outputFile: outputFile.map { URL(fileURLWithPath: $0) }
+        )
+
+        let daemon = TriviaGenDaemon(config: config, db: dbService, httpClient: httpClient, logger: logger)
+
+        if noOpentdb { await daemon.disableProvider("OpenTriviaDB") }
+        if noTriviaapi { await daemon.disableProvider("TheTriviaAPI") }
+        if noJservice { await daemon.disableProvider("jService") }
+        if noAi { await daemon.disableProvider("AI Generator") }
+        if noFileImport { await daemon.disableProvider("File Import") }
+
+        // Setup signal handling
+        let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        signal(SIGINT, SIG_IGN)
+        signalSource.setEventHandler {
+            Task {
+                logger.info("Received SIGINT, shutting down...")
+                await daemon.stop()
+                Foundation.exit(0)
+            }
+        }
+        signalSource.resume()
+
+        let sigTermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        signal(SIGTERM, SIG_IGN)
+        sigTermSource.setEventHandler {
+            Task {
+                logger.info("Received SIGTERM, shutting down...")
+                await daemon.stop()
+                Foundation.exit(0)
+            }
+        }
+        sigTermSource.resume()
+
+        let sigUsr1Source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        signal(SIGUSR1, SIG_IGN)
+        sigUsr1Source.setEventHandler {
+            Task {
+                let currentState = await daemon.state
+                if currentState == .running {
+                    await daemon.pause()
+                } else if currentState == .paused {
+                    await daemon.resume()
+                }
+            }
+        }
+        sigUsr1Source.resume()
+
+        if dryRun {
+            logger.info("DRY RUN MODE: No questions will be written")
+        }
+        if let outputFile {
+            logger.info("FILE OUTPUT MODE: Writing questions to \(outputFile)")
+        }
+
+        logger.info("""
+
+        ╔══════════════════════════════════════════════╗
+        ║       Alities Engine Daemon Started          ║
+        ╠══════════════════════════════════════════════╣
+        ║  Press Ctrl+C to stop                        ║
+        ║  Send SIGUSR1 to pause/resume                ║
+        ║  Cycle interval: \(String(format: "%3d", interval)) seconds                  ║
+        ║  Batch size: \(String(format: "%3d", batchSize)) questions                   ║
+        ╚══════════════════════════════════════════════╝
+
+        """)
+
+        await daemon.start()
+    }
+}
+
+// MARK: - List Providers Command
+
+struct ListProvidersCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "list-providers",
+        abstract: "List all available trivia providers"
+    )
+
+    mutating func run() throws {
+        let providers: [(name: String, source: String, requiresKey: Bool)] = [
+            ("OpenTriviaDB", "opentdb.com", false),
+            ("TheTriviaAPI", "the-trivia-api.com", false),
+            ("jService", "the-trivia-api.com (history, science, geography, culture, arts)", false),
+            ("AI Generator", "OpenAI GPT-4", true),
+            ("File Import", "Local JSON/CSV files", false),
+        ]
+
+        print("")
+        print("Available Trivia Providers:")
+        print("───────────────────────────────────────────────────")
+        for p in providers {
+            let keyNote = p.requiresKey ? " (requires OPENAI_API_KEY)" : ""
+            print("  \(p.name)")
+            print("    Source: \(p.source)\(keyNote)")
+        }
+        print("───────────────────────────────────────────────────")
+        print("")
+        print("Disable a provider with: alities-engine run --no-opentdb, --no-ai, --no-file-import")
+        print("")
+    }
+}
+
+// MARK: - Status Command
+
+struct StatusCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "status",
+        abstract: "Show daemon status"
+    )
+
+    mutating func run() async throws {
+        print("Status command — daemon runs as foreground process")
+        print("Check /tmp/alities-engine.stats.json for runtime stats")
+    }
+}
