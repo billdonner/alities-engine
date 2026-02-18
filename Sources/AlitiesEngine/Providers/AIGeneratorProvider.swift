@@ -10,7 +10,7 @@ final class AIGeneratorProvider: TriviaProvider {
     private let httpClient: HTTPClient
     private let apiKey: String?
     private let baseURL = "https://api.openai.com/v1/chat/completions"
-    private let concurrentBatches = 8
+    private let concurrentBatches = 5
 
     private let categories = [
         "Science", "History", "Geography", "Sports", "Movies",
