@@ -58,11 +58,11 @@ actor TriviaGenDaemon {
         logger.info("Daemon paused")
     }
 
-    func resume() async {
+    func resume() {
         guard state == .paused else { return }
         state = .running
         logger.info("Daemon resumed")
-        await runLoop()
+        Task { await self.runLoop() }
     }
 
     func stop() {

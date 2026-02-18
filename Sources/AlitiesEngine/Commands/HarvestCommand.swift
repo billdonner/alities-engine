@@ -1,7 +1,5 @@
 import Foundation
 import ArgumentParser
-import AsyncHTTPClient
-import NIOCore
 
 struct HarvestCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -19,7 +17,7 @@ struct HarvestCommand: AsyncParsableCommand {
     var port: Int?
 
     mutating func run() async throws {
-        let resolvedPort = try port ?? Self.discoverPort()
+        let resolvedPort = try port ?? CtlHelper.discoverPort()
         let categoryList = categories.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
 
         guard !categoryList.isEmpty else {
@@ -30,51 +28,36 @@ struct HarvestCommand: AsyncParsableCommand {
         let body: [String: Any] = ["categories": categoryList, "count": count]
         let bodyData = try JSONSerialization.data(withJSONObject: body)
 
-        let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
-        defer { try? httpClient.syncShutdown() }
-
-        var request = HTTPClientRequest(url: "http://127.0.0.1:\(resolvedPort)/harvest")
-        request.method = .POST
-        request.headers.add(name: "Content-Type", value: "application/json")
-        request.body = .bytes(ByteBuffer(data: bodyData))
+        let url = URL(string: "http://127.0.0.1:\(resolvedPort)/harvest")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = bodyData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
 
         do {
-            let response = try await httpClient.execute(request, timeout: .seconds(10))
-            let responseBody = try await response.body.collect(upTo: 1024 * 1024)
-            let json = String(buffer: responseBody)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
-            if response.status == .accepted || response.status == .ok {
+            if statusCode == 202 || statusCode == 200 {
                 print("Harvest request accepted:")
                 print("  Categories: \(categoryList.joined(separator: ", "))")
                 print("  Count: \(count)")
-                if let data = json.data(using: .utf8),
-                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let id = dict["id"] {
                     print("  Harvest ID: \(id)")
                 }
                 print("\nThe daemon is generating questions in the background.")
                 print("Use 'alities-engine ctl status' to check progress.")
             } else {
-                print("Error (\(response.status)): \(json)")
+                let json = String(data: data, encoding: .utf8) ?? ""
+                print("Error (\(statusCode)): \(json)")
                 throw ExitCode.failure
             }
-        } catch let error as HTTPClientError {
+        } catch is URLError {
             print("Error: Could not connect to daemon on port \(resolvedPort)")
             print("Is the daemon running? Start it with: alities-engine run")
-            print("Detail: \(error.localizedDescription)")
             throw ExitCode.failure
         }
-    }
-
-    static func discoverPort() throws -> Int {
-        let portFile = "/tmp/alities-engine.port"
-        guard FileManager.default.fileExists(atPath: portFile),
-              let contents = try? String(contentsOfFile: portFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
-              let port = Int(contents) else {
-            print("Error: No running daemon found (no port file at \(portFile))")
-            print("Start the daemon with: alities-engine run")
-            throw ExitCode.failure
-        }
-        return port
     }
 }

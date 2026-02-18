@@ -1,8 +1,5 @@
 import Foundation
 import ArgumentParser
-import AsyncHTTPClient
-import NIOCore
-import NIOHTTP1
 
 struct CtlCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -35,22 +32,20 @@ enum CtlHelper {
         return port
     }
 
-    static func sendRequest(method: HTTPMethod, path: String, port: Int, body: Data? = nil) async throws -> (HTTPResponseStatus, [String: Any]) {
-        let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
-        defer { try? httpClient.syncShutdown() }
-
-        var request = HTTPClientRequest(url: "http://127.0.0.1:\(port)\(path)")
-        request.method = method
+    static func sendRequest(method: String, path: String, port: Int, body: Data? = nil) async throws -> (Int, [String: Any]) {
+        let url = URL(string: "http://127.0.0.1:\(port)\(path)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 10
         if let body {
-            request.headers.add(name: "Content-Type", value: "application/json")
-            request.body = .bytes(ByteBuffer(data: body))
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        let response = try await httpClient.execute(request, timeout: .seconds(10))
-        let responseBody = try await response.body.collect(upTo: 1024 * 1024)
-        let data = Data(buffer: responseBody)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-        return (response.status, json)
+        return (statusCode, json)
     }
 }
 
@@ -65,8 +60,8 @@ struct CtlStatusCommand: AsyncParsableCommand {
     mutating func run() async throws {
         let resolvedPort = try port ?? CtlHelper.discoverPort()
         do {
-            let (status, json) = try await CtlHelper.sendRequest(method: .GET, path: "/status", port: resolvedPort)
-            guard status == .ok else {
+            let (statusCode, json) = try await CtlHelper.sendRequest(method: "GET", path: "/status", port: resolvedPort)
+            guard statusCode == 200 else {
                 print("Error: \(json["error"] ?? "Unknown error")")
                 throw ExitCode.failure
             }
@@ -91,7 +86,7 @@ struct CtlStatusCommand: AsyncParsableCommand {
                     print("    [\(enabled)] \(name): fetched=\(fetched) added=\(added)")
                 }
             }
-        } catch is HTTPClientError {
+        } catch is URLError {
             print("Error: Could not connect to daemon on port \(resolvedPort)")
             print("Is the daemon running? Start it with: alities-engine run")
             throw ExitCode.failure
@@ -109,7 +104,7 @@ struct CtlPauseCommand: AsyncParsableCommand {
 
     mutating func run() async throws {
         let resolvedPort = try port ?? CtlHelper.discoverPort()
-        let (_, json) = try await CtlHelper.sendRequest(method: .POST, path: "/pause", port: resolvedPort)
+        let (_, json) = try await CtlHelper.sendRequest(method: "POST", path: "/pause", port: resolvedPort)
         print("Daemon state: \(json["state"] ?? "unknown")")
     }
 }
@@ -124,7 +119,7 @@ struct CtlResumeCommand: AsyncParsableCommand {
 
     mutating func run() async throws {
         let resolvedPort = try port ?? CtlHelper.discoverPort()
-        let (_, json) = try await CtlHelper.sendRequest(method: .POST, path: "/resume", port: resolvedPort)
+        let (_, json) = try await CtlHelper.sendRequest(method: "POST", path: "/resume", port: resolvedPort)
         print("Daemon state: \(json["state"] ?? "unknown")")
     }
 }
@@ -139,7 +134,7 @@ struct CtlStopCommand: AsyncParsableCommand {
 
     mutating func run() async throws {
         let resolvedPort = try port ?? CtlHelper.discoverPort()
-        let (_, json) = try await CtlHelper.sendRequest(method: .POST, path: "/stop", port: resolvedPort)
+        let (_, json) = try await CtlHelper.sendRequest(method: "POST", path: "/stop", port: resolvedPort)
         print("Daemon state: \(json["state"] ?? "stopping")")
         print("Daemon is shutting down gracefully.")
     }
@@ -166,9 +161,9 @@ struct CtlImportCommand: AsyncParsableCommand {
         }
 
         let body = try JSONSerialization.data(withJSONObject: ["file": absPath])
-        let (status, json) = try await CtlHelper.sendRequest(method: .POST, path: "/import", port: resolvedPort, body: body)
+        let (statusCode, json) = try await CtlHelper.sendRequest(method: "POST", path: "/import", port: resolvedPort, body: body)
 
-        if status == .ok {
+        if statusCode == 200 {
             print("Import complete:")
             print("  Inserted: \(json["inserted"] ?? 0)")
             print("  Duplicates: \(json["duplicates"] ?? 0)")
@@ -190,17 +185,17 @@ struct CtlCategoriesCommand: AsyncParsableCommand {
 
     mutating func run() async throws {
         let resolvedPort = try port ?? CtlHelper.discoverPort()
-        let (status, json) = try await CtlHelper.sendRequest(method: .GET, path: "/categories", port: resolvedPort)
+        let (statusCode, json) = try await CtlHelper.sendRequest(method: "GET", path: "/categories", port: resolvedPort)
 
-        if status == .ok {
+        if statusCode == 200 {
             if let categories = json["categories"] as? [[String: Any]] {
                 print("Categories (\(json["total"] ?? 0) total):")
-                print("  \(String(format: "%-30s", "Category"))  Count")
+                print("  \("Category".padding(toLength: 30, withPad: " ", startingAt: 0))  Count")
                 print("  " + String(repeating: "─", count: 40))
                 for cat in categories {
                     let name = cat["name"] as? String ?? "?"
                     let count = cat["count"] as? Int ?? 0
-                    print("  \(String(format: "%-30s", name))  \(count)")
+                    print("  \(name.padding(toLength: 30, withPad: " ", startingAt: 0))  \(count)")
                 }
             }
         } else {

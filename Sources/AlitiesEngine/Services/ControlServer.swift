@@ -231,6 +231,8 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         var buffer = context.channel.allocator.buffer(capacity: body.count)
         buffer.writeBytes(body)
         context.write(wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
-        context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
+        context.writeAndFlush(wrapOutboundOut(.end(nil))).whenComplete { _ in
+            context.close(promise: nil)
+        }
     }
 }
