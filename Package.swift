@@ -26,5 +26,9 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
             ]
         ),
+        .testTarget(
+            name: "AlitiesEngineTests",
+            dependencies: ["AlitiesEngine"]
+        ),
     ]
 )
