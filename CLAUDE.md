@@ -23,6 +23,10 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 - `swift run AlitiesEngine run --dry-run` — run daemon without writing
 - `swift run AlitiesEngine list-providers` — show available providers
 - `swift run AlitiesEngine categories` — list categories with counts
+- `swift run AlitiesEngine run --port 9847` — run daemon with HTTP control server
+- `swift run AlitiesEngine harvest --categories Comics,Vehicles --count 50` — targeted AI generation
+- `swift run AlitiesEngine ctl status` — show running daemon status
+- `swift run AlitiesEngine ctl pause` / `resume` / `stop` — control daemon
 
 ## Permissions — MOVE AGGRESSIVELY
 
@@ -47,6 +51,8 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 | `report` | trivia-profile | Profile trivia data (from files or SQLite) |
 | `stats` | trivia-profile | Quick database summary (default command) |
 | `categories` | trivia-profile | List categories with counts and aliases |
+| `harvest` | control-server | Request targeted AI generation from running daemon |
+| `ctl` | control-server | Control running daemon (status/pause/resume/stop/import/categories) |
 
 ### Source Layout
 
@@ -69,6 +75,7 @@ Sources/AlitiesEngine/
 │   ├── TriviaGenDaemon.swift  # Main daemon actor
 │   ├── PostgresService.swift  # PostgreSQL operations
 │   ├── GameDataTransformer.swift
+│   ├── ControlServer.swift    # NIO HTTP control server (localhost:9847)
 │   └── SimilarityService.swift
 ├── Profile/
 │   ├── TriviaDatabase.swift   # SQLite/GRDB operations
@@ -80,7 +87,9 @@ Sources/AlitiesEngine/
     ├── ExportCommand.swift
     ├── ReportCommand.swift
     ├── StatsCommand.swift
-    └── CategoriesCommand.swift
+    ├── CategoriesCommand.swift
+    ├── HarvestCommand.swift    # CLI client for /harvest endpoint
+    └── CtlCommand.swift        # CLI client for daemon control
 ```
 
 ### Trivia Providers
@@ -105,6 +114,9 @@ Sources/AlitiesEngine/
 - `TopicPicMapping` (substring-based) for daemon output; `CategoryMap` (alias-based) for profile operations
 - SHA-256 hash dedup in SQLite; Jaccard + AI similarity dedup in PostgreSQL
 - `DatabaseService` renamed to `PostgresService` to avoid confusion with GRDB's `TriviaDatabase`
+- HTTP control server on `localhost:9847` (configurable via `--port`) for daemon control
+- Port file written to `/tmp/alities-engine.port` for CLI auto-discovery
+- `harvest` command fires async targeted AI generation; `ctl` commands for real-time daemon control
 
 ## Cross-Project Sync
 
