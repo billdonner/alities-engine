@@ -105,24 +105,16 @@ actor TriviaGenDaemon {
             let questions = try await aiProvider.fetchQuestions(count: count, categories: categories)
             logger.info("Harvest fetched \(questions.count) questions")
 
-            var added = 0
+            let prevAdded = stats.questionsAdded
             for question in questions {
-                if config.outputFile != nil {
-                    collectedQuestions.append(question)
-                    added += 1
-                } else if config.dryRun {
-                    logger.info("[DRY RUN] Would add: \(question.text.prefix(60))...")
-                    added += 1
-                } else {
-                    await processQuestion(question, from: "AI Generator (harvest)")
-                    added += 1
-                }
+                await processQuestion(question, from: "AI Generator (harvest)")
             }
 
             stats.totalFetched += questions.count
             if config.outputFile != nil { writeOutputFile() }
             writeStatsFile()
 
+            let added = stats.questionsAdded - prevAdded
             return (questions.count, added, 0)
         } catch {
             logger.error("Harvest failed: \(error.localizedDescription)")
@@ -277,37 +269,49 @@ actor TriviaGenDaemon {
                 return
             }
 
+            // File output (always runs if outputFile is set)
             if config.outputFile != nil {
                 collectedQuestions.append(question)
-                stats.questionsAdded += 1
-                stats.providerStats[providerName]?.added += 1
                 logger.info("Collected question: \(question.text.prefix(60))...")
-                return
             }
 
-            guard let db else {
+            // PostgreSQL insert (runs if db is available)
+            if let db {
+                let existingQuestions = try await db.getExistingQuestions(limit: config.similarityCheckLimit)
+
+                if let similarId = await similarity.findSimilar(question, existingQuestions: existingQuestions) {
+                    logger.debug("Skipping Postgres duplicate (similar to \(similarId)): \(question.text.prefix(50))...")
+                    stats.duplicatesSkipped += 1
+                    stats.providerStats[providerName]?.duplicates += 1
+                    // Still count as added if file output succeeded
+                    if config.outputFile != nil {
+                        stats.questionsAdded += 1
+                        stats.providerStats[providerName]?.added += 1
+                    }
+                    return
+                }
+
+                do {
+                    let categoryId = try await db.getOrCreateCategory(name: question.category)
+                    let sourceId = try await db.getOrCreateSource(name: providerName, type: "api")
+                    let questionId = try await db.insertQuestion(question, categoryId: categoryId, sourceId: sourceId)
+                    try await db.incrementSourceCount(sourceId: sourceId)
+                    await similarity.register(question, id: questionId)
+                    logger.info("Added to Postgres: \(question.text.prefix(50))...")
+                } catch {
+                    if config.outputFile != nil {
+                        logger.warning("Postgres insert failed (file write succeeded): \(error.localizedDescription)")
+                    } else {
+                        throw error
+                    }
+                }
+            } else if config.outputFile == nil {
                 logger.error("No database connection and no output file configured")
                 return
             }
 
-            let existingQuestions = try await db.getExistingQuestions(limit: config.similarityCheckLimit)
-
-            if let similarId = await similarity.findSimilar(question, existingQuestions: existingQuestions) {
-                logger.debug("Skipping duplicate question (similar to \(similarId)): \(question.text.prefix(50))...")
-                stats.duplicatesSkipped += 1
-                stats.providerStats[providerName]?.duplicates += 1
-                return
-            }
-
-            let categoryId = try await db.getOrCreateCategory(name: question.category)
-            let sourceId = try await db.getOrCreateSource(name: providerName, type: "api")
-            let questionId = try await db.insertQuestion(question, categoryId: categoryId, sourceId: sourceId)
-            try await db.incrementSourceCount(sourceId: sourceId)
-            await similarity.register(question, id: questionId)
-
             stats.questionsAdded += 1
             stats.providerStats[providerName]?.added += 1
-            logger.info("Added question: \(question.text.prefix(50))...")
 
         } catch {
             logger.error("Failed to process question: \(error.localizedDescription)")

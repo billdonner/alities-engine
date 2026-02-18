@@ -87,7 +87,7 @@ struct RunCommand: AsyncParsableCommand {
         var dbService: PostgresService? = nil
         var connection: PostgresConnection? = nil
 
-        if outputFile == nil && !dryRun {
+        if !dryRun {
             logger.info("Database: \(dbUser)@\(dbHost):\(dbPort)/\(dbName)")
             logger.info("Connecting to database...")
             let dbConfig = PostgresConnection.Configuration(
@@ -96,12 +96,22 @@ struct RunCommand: AsyncParsableCommand {
                 database: dbName, tls: .disable
             )
 
-            let conn = try await PostgresConnection.connect(
-                configuration: dbConfig, id: 1, logger: logger
-            )
-            connection = conn
-            logger.info("Database connected")
-            dbService = PostgresService(connection: conn, logger: logger)
+            do {
+                let conn = try await PostgresConnection.connect(
+                    configuration: dbConfig, id: 1, logger: logger
+                )
+                connection = conn
+                logger.info("Database connected")
+                let pgService = PostgresService(connection: conn, logger: logger)
+                try await pgService.ensureHintColumn()
+                dbService = pgService
+            } catch {
+                if outputFile != nil {
+                    logger.warning("PostgreSQL unavailable, falling back to file-only mode: \(error.localizedDescription)")
+                } else {
+                    throw error
+                }
+            }
         }
 
         defer {
@@ -164,11 +174,19 @@ struct RunCommand: AsyncParsableCommand {
         }
         sigUsr1Source.resume()
 
+        let writeMode: String
         if dryRun {
+            writeMode = "DRY-RUN"
             logger.info("DRY RUN MODE: No questions will be written")
-        }
-        if let outputFile {
+        } else if dbService != nil && outputFile != nil {
+            writeMode = "DUAL-WRITE"
+            logger.info("DUAL-WRITE MODE: Writing to both PostgreSQL and \(outputFile!)")
+        } else if let outputFile {
+            writeMode = "FILE-ONLY"
             logger.info("FILE OUTPUT MODE: Writing questions to \(outputFile)")
+        } else {
+            writeMode = "DATABASE"
+            logger.info("DATABASE MODE: Writing to PostgreSQL")
         }
 
         // Start control server
@@ -194,6 +212,7 @@ struct RunCommand: AsyncParsableCommand {
         }
 
         let controlLine = port > 0 ? "║  Control: http://127.0.0.1:\(String(format: "%-5d", port))              ║" : "║  Control: disabled                           ║"
+        let modeLine = "║  Mode: \(String(format: "%-10s", writeMode))                             ║"
 
         logger.info("""
 
@@ -204,6 +223,7 @@ struct RunCommand: AsyncParsableCommand {
         ║  Send SIGUSR1 to pause/resume                ║
         ║  Cycle interval: \(String(format: "%3d", interval)) seconds                  ║
         ║  Batch size: \(String(format: "%3d", batchSize)) questions                   ║
+        \(modeLine)
         \(controlLine)
         ╚══════════════════════════════════════════════╝
 

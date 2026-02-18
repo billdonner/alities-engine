@@ -27,6 +27,8 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 - `swift run AlitiesEngine harvest --categories Comics,Vehicles --count 50` — targeted AI generation
 - `swift run AlitiesEngine ctl status` — show running daemon status
 - `swift run AlitiesEngine ctl pause` / `resume` / `stop` — control daemon
+- `swift run AlitiesEngine migrate --dry-run` — preview SQLite→PostgreSQL migration
+- `swift run AlitiesEngine migrate` — migrate SQLite questions to PostgreSQL
 
 ## Permissions — MOVE AGGRESSIVELY
 
@@ -42,7 +44,7 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 
 | Command | Origin | Description |
 |---------|--------|-------------|
-| `run` | trivia-gen-daemon | Start acquisition daemon (PostgreSQL or file output) |
+| `run` | trivia-gen-daemon | Start acquisition daemon (dual-write, file, or database mode) |
 | `list-providers` | trivia-gen-daemon | Show available trivia providers |
 | `status` | trivia-gen-daemon | Show daemon status |
 | `gen-import` | trivia-gen-daemon | Import file directly to PostgreSQL |
@@ -53,6 +55,7 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 | `categories` | trivia-profile | List categories with counts and aliases |
 | `harvest` | control-server | Request targeted AI generation from running daemon |
 | `ctl` | control-server | Control running daemon (status/pause/resume/stop/import/categories) |
+| `migrate` | migration | Migrate SQLite questions to PostgreSQL (with dedup) |
 
 ### Source Layout
 
@@ -89,7 +92,8 @@ Sources/AlitiesEngine/
     ├── StatsCommand.swift
     ├── CategoriesCommand.swift
     ├── HarvestCommand.swift    # CLI client for /harvest endpoint
-    └── CtlCommand.swift        # CLI client for daemon control
+    ├── CtlCommand.swift        # CLI client for daemon control
+    └── MigrateCommand.swift    # SQLite→PostgreSQL migration
 ```
 
 ### Trivia Providers
@@ -117,6 +121,8 @@ Sources/AlitiesEngine/
 - HTTP control server on `localhost:9847` (configurable via `--port`) for daemon control
 - Port file written to `/tmp/alities-engine.port` for CLI auto-discovery
 - `harvest` command fires async targeted AI generation; `ctl` commands for real-time daemon control
+- Daemon supports dual-write mode: `--output-file` with Postgres auto-connects to both; falls back to file-only if Postgres unavailable
+- `migrate` command moves SQLite questions to PostgreSQL with normalized-text dedup and cached category/source lookups
 
 ## Cross-Project Sync
 

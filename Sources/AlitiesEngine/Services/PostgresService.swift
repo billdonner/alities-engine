@@ -68,7 +68,7 @@ actor PostgresService {
         try await connection.query(
             """
             INSERT INTO question_sources (id, name, type, question_count, created_at, updated_at)
-            VALUES (\(newId), \(name), 'api'::source_type, 0, NOW(), NOW())
+            VALUES (\(newId), \(name), \(type)::source_type, 0, NOW(), NOW())
             """,
             logger: logger
         )
@@ -123,16 +123,57 @@ actor PostgresService {
         let choicesJson = String(data: choicesData, encoding: .utf8) ?? "{\"items\":[]}"
         let difficultyStr = question.difficulty.rawValue
         let explanationStr = question.explanation ?? ""
+        let hintStr = question.hint ?? ""
 
         try await connection.query(
             """
-            INSERT INTO questions (id, text, choices, correct_choice_index, category_id, source_id, difficulty, explanation, created_at, updated_at)
-            VALUES (\(questionId), \(question.text), \(choicesJson)::jsonb, \(question.correctChoiceIndex), \(categoryId), \(sourceId), \(difficultyStr)::difficulty, \(explanationStr), NOW(), NOW())
+            INSERT INTO questions (id, text, choices, correct_choice_index, category_id, source_id, difficulty, explanation, hint, created_at, updated_at)
+            VALUES (\(questionId), \(question.text), \(choicesJson)::jsonb, \(question.correctChoiceIndex), \(categoryId), \(sourceId), \(difficultyStr)::difficulty, \(explanationStr), \(hintStr), NOW(), NOW())
             """,
             logger: logger
         )
 
         return questionId
+    }
+
+    /// Idempotent: adds hint column to questions table if missing
+    func ensureHintColumn() async throws {
+        let rows = try await connection.query(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'questions' AND column_name = 'hint'
+            """,
+            logger: logger
+        )
+
+        var exists = false
+        for try await _ in rows.decode(String.self) {
+            exists = true
+        }
+
+        if !exists {
+            try await connection.query(
+                "ALTER TABLE questions ADD COLUMN hint TEXT DEFAULT ''",
+                logger: logger
+            )
+            logger.info("Added hint column to questions table")
+        }
+    }
+
+    /// Load all existing question texts (normalized) for O(1) dedup during migration
+    func getAllQuestionTexts() async throws -> Set<String> {
+        var texts = Set<String>()
+        let rows = try await connection.query(
+            "SELECT text FROM questions",
+            logger: logger
+        )
+        for try await (text,) in rows.decode(String.self) {
+            let normalized = text.lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
+            texts.insert(normalized)
+        }
+        return texts
     }
 
     func getQuestionCount() async throws -> Int {
