@@ -75,6 +75,61 @@ actor TriviaGenDaemon {
 
     func getStats() -> DaemonStats { return stats }
 
+    func getExportedStats() -> ExportedDaemonStats {
+        let providerStatuses = providers.map { provider in
+            let pStats = stats.providerStats[provider.name] ?? ProviderStats()
+            return ProviderStatus(
+                name: provider.name, enabled: provider.isEnabled,
+                fetched: pStats.fetched, added: pStats.added,
+                duplicates: pStats.duplicates, errors: pStats.errors
+            )
+        }
+        return ExportedDaemonStats(
+            state: state.stringValue, startTime: stats.startTime,
+            totalFetched: stats.totalFetched, questionsAdded: stats.questionsAdded,
+            duplicatesSkipped: stats.duplicatesSkipped, errors: stats.errors,
+            providers: providerStatuses
+        )
+    }
+
+    /// Harvest questions for specific categories using AI provider
+    func harvestCategories(_ categories: [String], count: Int) async -> (fetched: Int, added: Int, errors: Int) {
+        guard let aiProvider = providers.first(where: { $0 is AIGeneratorProvider }) as? AIGeneratorProvider else {
+            logger.error("AI Generator provider not found")
+            return (0, 0, 1)
+        }
+
+        logger.info("Harvesting \(count) questions for categories: \(categories.joined(separator: ", "))")
+
+        do {
+            let questions = try await aiProvider.fetchQuestions(count: count, categories: categories)
+            logger.info("Harvest fetched \(questions.count) questions")
+
+            var added = 0
+            for question in questions {
+                if config.outputFile != nil {
+                    collectedQuestions.append(question)
+                    added += 1
+                } else if config.dryRun {
+                    logger.info("[DRY RUN] Would add: \(question.text.prefix(60))...")
+                    added += 1
+                } else {
+                    await processQuestion(question, from: "AI Generator (harvest)")
+                    added += 1
+                }
+            }
+
+            stats.totalFetched += questions.count
+            if config.outputFile != nil { writeOutputFile() }
+            writeStatsFile()
+
+            return (questions.count, added, 0)
+        } catch {
+            logger.error("Harvest failed: \(error.localizedDescription)")
+            return (0, 0, 1)
+        }
+    }
+
     private func writeOutputFile() {
         guard let outputFile = config.outputFile else { return }
         guard !collectedQuestions.isEmpty else { return }

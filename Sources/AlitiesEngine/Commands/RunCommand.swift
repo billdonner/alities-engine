@@ -5,6 +5,7 @@ import AsyncHTTPClient
 import PostgresNIO
 import NIOCore
 import NIOPosix
+import GRDB
 
 // MARK: - Run Command (daemon)
 
@@ -64,6 +65,12 @@ struct RunCommand: AsyncParsableCommand {
 
     @Option(name: .long, help: "Write questions to a JSON file instead of the database")
     var outputFile: String?
+
+    @Option(name: .long, help: "Control server port (0 to disable)")
+    var port: Int = 9847
+
+    @Option(name: .long, help: "SQLite database path for control server operations")
+    var db: String = "~/trivia.db"
 
     mutating func run() async throws {
         var logger = Logger(label: "alities-engine")
@@ -164,6 +171,30 @@ struct RunCommand: AsyncParsableCommand {
             logger.info("FILE OUTPUT MODE: Writing questions to \(outputFile)")
         }
 
+        // Start control server
+        var controlServer: ControlServer? = nil
+        var triviaDB: TriviaDatabase? = nil
+        if port > 0 {
+            let dbPath = NSString(string: db).expandingTildeInPath
+            do {
+                triviaDB = try TriviaDatabase(path: dbPath)
+                logger.info("SQLite database opened at \(dbPath)")
+            } catch {
+                logger.warning("Could not open SQLite database at \(dbPath): \(error.localizedDescription)")
+            }
+
+            let server = ControlServer(daemon: daemon, triviaDB: triviaDB, port: port, logger: logger)
+            try await server.start(eventLoopGroup: eventLoopGroup)
+            controlServer = server
+        }
+        defer {
+            if let controlServer {
+                Task { await controlServer.stop() }
+            }
+        }
+
+        let controlLine = port > 0 ? "║  Control: http://127.0.0.1:\(String(format: "%-5d", port))              ║" : "║  Control: disabled                           ║"
+
         logger.info("""
 
         ╔══════════════════════════════════════════════╗
@@ -173,6 +204,7 @@ struct RunCommand: AsyncParsableCommand {
         ║  Send SIGUSR1 to pause/resume                ║
         ║  Cycle interval: \(String(format: "%3d", interval)) seconds                  ║
         ║  Batch size: \(String(format: "%3d", batchSize)) questions                   ║
+        \(controlLine)
         ╚══════════════════════════════════════════════╝
 
         """)

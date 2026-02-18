@@ -18,6 +18,9 @@ struct AlitiesEngineCLI: AsyncParsableCommand {
             ReportCommand.self,
             StatsCommand.self,
             CategoriesCommand.self,
+            // Control commands (HTTP client to running daemon)
+            HarvestCommand.self,
+            CtlCommand.self,
         ],
         defaultSubcommand: StatsCommand.self
     )

@@ -14,6 +14,8 @@ let package = Package(
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.19.0"),
         // Profile dependencies
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
+        // NIO (already resolved as transitive dep, added here to expose NIOHTTP1)
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.94.0"),
     ],
     targets: [
         .executableTarget(
@@ -24,6 +26,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
             ]
         ),
         .testTarget(

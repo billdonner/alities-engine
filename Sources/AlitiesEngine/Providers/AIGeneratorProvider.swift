@@ -13,9 +13,10 @@ final class AIGeneratorProvider: TriviaProvider {
     private let concurrentBatches = 5
 
     private let categories = [
-        "Science", "History", "Geography", "Sports", "Movies",
-        "Music", "Literature", "Art", "Technology", "Nature",
-        "Food & Drink", "Pop Culture", "Mathematics", "Politics", "Mythology"
+        "Science & Nature", "History", "Geography", "Sports", "Film & TV",
+        "Music", "Literature", "Arts & Literature", "Technology", "Food & Drink",
+        "Pop Culture", "Mathematics", "Politics", "Mythology", "Video Games",
+        "Board Games", "Comics", "Vehicles", "Society & Culture", "General Knowledge"
     ]
 
     init(httpClient: HTTPClient, apiKey: String?) {
@@ -39,6 +40,33 @@ final class AIGeneratorProvider: TriviaProvider {
                     try await Self.fetchBatch(
                         httpClient: httpClient, baseURL: baseURL,
                         apiKey: apiKey, count: 10,
+                        category: category, difficulty: difficulty
+                    )
+                }
+            }
+            var all = [TriviaQuestion]()
+            for try await batch in group {
+                all.append(contentsOf: batch)
+            }
+            return all
+        }
+    }
+
+    /// Targeted fetch for specific categories (used by harvest command)
+    func fetchQuestions(count: Int, categories targetCategories: [String]) async throws -> [TriviaQuestion] {
+        guard let apiKey = apiKey, !apiKey.isEmpty else {
+            throw ProviderError.apiKeyMissing
+        }
+
+        let perCategory = max(1, count / max(1, targetCategories.count))
+
+        return try await withThrowingTaskGroup(of: [TriviaQuestion].self) { group in
+            for category in targetCategories {
+                let difficulty = Difficulty.allCases.randomElement() ?? .medium
+                group.addTask { [httpClient, baseURL] in
+                    try await Self.fetchBatch(
+                        httpClient: httpClient, baseURL: baseURL,
+                        apiKey: apiKey, count: perCategory,
                         category: category, difficulty: difficulty
                     )
                 }
