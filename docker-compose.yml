@@ -1,0 +1,54 @@
+services:
+  engine:
+    build: .
+    ports:
+      - "9847:9847"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CONTROL_API_KEY=${CONTROL_API_KEY}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=trivia
+      - DB_PASSWORD=trivia
+      - DB_NAME=trivia_db
+    volumes:
+      - engine-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - run
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "9847"
+      - --db
+      - /data/trivia.db
+      - --db-host
+      - postgres
+      - --db-port
+      - "5432"
+      - --db-user
+      - trivia
+      - --db-password
+      - trivia
+      - --db-name
+      - trivia_db
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: trivia
+      POSTGRES_PASSWORD: trivia
+      POSTGRES_DB: trivia_db
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trivia"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  engine-data:
+  pg-data:

@@ -118,8 +118,10 @@ Sources/AlitiesEngine/
 - `TopicPicMapping` (substring-based) for daemon output; `CategoryMap` (alias-based) for profile operations
 - SHA-256 hash dedup in SQLite; Jaccard + AI similarity dedup in PostgreSQL
 - `DatabaseService` renamed to `PostgresService` to avoid confusion with GRDB's `TriviaDatabase`
-- HTTP control server on `localhost:9847` (configurable via `--port`) for daemon control
+- HTTP control server on `localhost:9847` (configurable via `--port` and `--host`) for daemon control
 - Port file written to `/tmp/alities-engine.port` for CLI auto-discovery
+- Bearer token auth on destructive POST endpoints via `CONTROL_API_KEY` env var
+- CORS headers on all responses for studio web app compatibility
 - `harvest` command fires async targeted AI generation; `ctl` commands for real-time daemon control
 - Daemon supports dual-write mode: `--output-file` with Postgres auto-connects to both; falls back to file-only if Postgres unavailable
 - `migrate` command moves SQLite questions to PostgreSQL with normalized-text dedup and cached category/source lookups
@@ -131,11 +133,34 @@ This is a satellite repo of the alities ecosystem:
 - Studio: `~/alities-studio` — web designer (not yet created)
 - Mobile: `~/alities-mobile` — iOS player (not yet created)
 
+## HTTP API Endpoints
+
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /health` | None | Health check (returns `{"ok": true}`) |
+| `GET /status` | None | Daemon status and stats |
+| `GET /categories` | None | List categories with counts |
+| `GET /gamedata` | None | Full GameDataOutput JSON (challenges for mobile app) |
+| `POST /harvest` | Bearer | Targeted AI question generation |
+| `POST /pause` | Bearer | Pause daemon |
+| `POST /resume` | Bearer | Resume daemon |
+| `POST /stop` | Bearer | Stop daemon |
+| `POST /import` | Bearer | Import JSON file to SQLite |
+
+## Docker & Deployment
+
+- `docker compose up` — run engine + PostgreSQL locally
+- `Dockerfile` — multi-stage build: `swift:5.9-jammy` → `ubuntu:22.04` runtime
+- `fly.toml` — Fly.io deployment config (auto-TLS, persistent volumes)
+- Deploy: `flyctl deploy` (requires `flyctl auth login` first)
+- Health check: `curl https://alities-engine.fly.dev/health`
+
 ## Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `OPENAI_API_KEY` | — | Required for AI provider |
+| `CONTROL_API_KEY` | — | Bearer token for POST endpoints (optional) |
 | `DB_HOST` | localhost | PostgreSQL host |
 | `DB_PORT` | 5432 | PostgreSQL port |
 | `DB_USER` | trivia | PostgreSQL user |

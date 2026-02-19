@@ -8,13 +8,15 @@ import Logging
 final class ControlServer {
     private let daemon: TriviaGenDaemon
     private let triviaDB: TriviaDatabase?
+    private let host: String
     private let port: Int
     private let logger: Logger
     private var channel: Channel?
 
-    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, port: Int, logger: Logger) {
+    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, host: String = "127.0.0.1", port: Int, logger: Logger) {
         self.daemon = daemon
         self.triviaDB = triviaDB
+        self.host = host
         self.port = port
         self.logger = logger
     }
@@ -36,9 +38,9 @@ final class ControlServer {
             }
             .childChannelOption(.socketOption(.so_reuseaddr), value: 1)
 
-        let channel = try await bootstrap.bind(host: "127.0.0.1", port: port).get()
+        let channel = try await bootstrap.bind(host: host, port: port).get()
         self.channel = channel
-        logger.info("Control server listening on http://127.0.0.1:\(port)")
+        logger.info("Control server listening on http://\(host):\(port)")
 
         // Write port file for CLI discovery
         let portFile = "/tmp/alities-engine.port"
@@ -61,6 +63,9 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
     private let triviaDB: TriviaDatabase?
     private let logger: Logger
 
+    /// API key for protecting destructive endpoints (from CONTROL_API_KEY env var)
+    private let apiKey: String?
+
     private var requestHead: HTTPRequestHead?
     private var body = ByteBuffer()
 
@@ -68,6 +73,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         self.daemon = daemon
         self.triviaDB = triviaDB
         self.logger = logger
+        self.apiKey = ProcessInfo.processInfo.environment["CONTROL_API_KEY"]
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -86,14 +92,22 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             let daemon = self.daemon
             let triviaDB = self.triviaDB
             let logger = self.logger
+            let apiKey = self.apiKey
             let path = head.uri.split(separator: "?").first.map(String.init) ?? head.uri
             let method = head.method
+            let headers = head.headers
+
+            // Handle CORS preflight
+            if method == .OPTIONS {
+                self.sendResponse(context: context, status: .ok, body: Data())
+                return
+            }
 
             // Handle async route processing
             let promise = context.eventLoop.makePromise(of: (Int, [String: Any]).self)
             promise.completeWithTask {
-                await Self.handleRoute(method: method, path: path, body: bodyData,
-                                       daemon: daemon, triviaDB: triviaDB, logger: logger)
+                await Self.handleRoute(method: method, path: path, body: bodyData, headers: headers,
+                                       daemon: daemon, triviaDB: triviaDB, logger: logger, apiKey: apiKey)
             }
             promise.futureResult.whenComplete { result in
                 let (status, responseDict): (Int, [String: Any])
@@ -110,12 +124,29 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         }
     }
 
+    /// Check Bearer token authorization for protected endpoints
+    private static func isAuthorized(headers: HTTPHeaders, apiKey: String?) -> Bool {
+        guard let apiKey = apiKey, !apiKey.isEmpty else {
+            return true // No key configured = no auth required
+        }
+        guard let authHeader = headers.first(name: "Authorization") else {
+            return false
+        }
+        return authHeader == "Bearer \(apiKey)"
+    }
+
     private static func handleRoute(
-        method: HTTPMethod, path: String, body: Data?,
-        daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger
+        method: HTTPMethod, path: String, body: Data?, headers: HTTPHeaders,
+        daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger, apiKey: String?
     ) async -> (Int, [String: Any]) {
 
         switch (method, path) {
+
+        // MARK: - Public GET endpoints
+
+        case (.GET, "/health"):
+            return (200, ["ok": true])
+
         case (.GET, "/status"):
             let stats = await daemon.getExportedStats()
             let encoder = JSONEncoder()
@@ -138,7 +169,47 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                 return (500, ["error": error.localizedDescription])
             }
 
+        case (.GET, "/gamedata"):
+            guard let db = triviaDB else {
+                return (503, ["error": "No SQLite database configured"])
+            }
+            do {
+                let questions = try db.allQuestions()
+                let challenges = questions.map { q in
+                    Challenge(
+                        topic: q.category,
+                        pic: CategoryMap.symbol(for: q.category),
+                        question: q.question,
+                        answers: q.answers,
+                        correct: q.correctAnswer,
+                        explanation: q.explanation ?? "",
+                        hint: q.hint ?? "",
+                        aisource: q.source ?? "unknown",
+                        date: Date().timeIntervalSinceReferenceDate
+                    )
+                }
+                let output = GameDataOutput(
+                    id: UUID().uuidString,
+                    generated: Date().timeIntervalSinceReferenceDate,
+                    challenges: challenges
+                )
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                if let data = try? encoder.encode(output),
+                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    return (200, dict)
+                }
+                return (500, ["error": "Failed to encode game data"])
+            } catch {
+                return (500, ["error": error.localizedDescription])
+            }
+
+        // MARK: - Protected POST endpoints (require Bearer token if CONTROL_API_KEY is set)
+
         case (.POST, "/harvest"):
+            guard isAuthorized(headers: headers, apiKey: apiKey) else {
+                return (401, ["error": "Unauthorized — Bearer token required"])
+            }
             guard let body = body,
                   let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                   let categories = json["categories"] as? [String] else {
@@ -163,16 +234,24 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             return (202, ["accepted": true, "id": String(harvestId), "categories": categories, "count": count])
 
         case (.POST, "/pause"):
+            guard isAuthorized(headers: headers, apiKey: apiKey) else {
+                return (401, ["error": "Unauthorized — Bearer token required"])
+            }
             await daemon.pause()
             return (200, ["state": "paused"])
 
         case (.POST, "/resume"):
+            guard isAuthorized(headers: headers, apiKey: apiKey) else {
+                return (401, ["error": "Unauthorized — Bearer token required"])
+            }
             await daemon.resume()
             return (200, ["state": "running"])
 
         case (.POST, "/stop"):
-            // Schedule stop after responding — daemon.stop() sets state to .stopped
-            // which causes runLoop to exit, allowing normal program termination with defers
+            guard isAuthorized(headers: headers, apiKey: apiKey) else {
+                return (401, ["error": "Unauthorized — Bearer token required"])
+            }
+            // Schedule stop after responding
             Task {
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay for response
                 await daemon.stop()
@@ -180,6 +259,9 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             return (200, ["state": "stopping"])
 
         case (.POST, "/import"):
+            guard isAuthorized(headers: headers, apiKey: apiKey) else {
+                return (401, ["error": "Unauthorized — Bearer token required"])
+            }
             guard let db = triviaDB else {
                 return (503, ["error": "No SQLite database configured"])
             }
@@ -227,6 +309,10 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         headers.add(name: "Content-Type", value: "application/json")
         headers.add(name: "Content-Length", value: "\(body.count)")
         headers.add(name: "Connection", value: "close")
+        // CORS headers for studio web app
+        headers.add(name: "Access-Control-Allow-Origin", value: "*")
+        headers.add(name: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS")
+        headers.add(name: "Access-Control-Allow-Headers", value: "Content-Type, Authorization")
 
         let head = HTTPResponseHead(version: .http1_1, status: status, headers: headers)
         context.write(wrapOutboundOut(.head(head)), promise: nil)

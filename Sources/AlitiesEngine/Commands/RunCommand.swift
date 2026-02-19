@@ -69,6 +69,9 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Control server port (0 to disable)")
     var port: Int = 9847
 
+    @Option(name: .long, help: "Control server bind address")
+    var host: String = "127.0.0.1"
+
     @Option(name: .long, help: "SQLite database path for control server operations")
     var db: String = "~/trivia.db"
 
@@ -201,7 +204,7 @@ struct RunCommand: AsyncParsableCommand {
                 logger.warning("Could not open SQLite database at \(dbPath): \(error.localizedDescription)")
             }
 
-            let server = ControlServer(daemon: daemon, triviaDB: triviaDB, port: port, logger: logger)
+            let server = ControlServer(daemon: daemon, triviaDB: triviaDB, host: host, port: port, logger: logger)
             try await server.start(eventLoopGroup: eventLoopGroup)
             controlServer = server
         }
@@ -211,7 +214,7 @@ struct RunCommand: AsyncParsableCommand {
             }
         }
 
-        let controlLine = port > 0 ? "║  Control: http://127.0.0.1:\(String(format: "%-5d", port))              ║" : "║  Control: disabled                           ║"
+        let controlLine = port > 0 ? "║  Control: http://\(host):\(String(format: "%-5d", port))              ║" : "║  Control: disabled                           ║"
         let modeLine = "║  Mode: \(String(format: "%-10s", writeMode))                             ║"
 
         logger.info("""
