@@ -147,6 +147,74 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         case (.GET, "/health"):
             return (200, ["ok": true])
 
+        case (.GET, "/metrics"):
+            var metrics: [[String: Any]] = []
+
+            // Daemon state
+            let stats = await daemon.getExportedStats()
+            let stateStr = await daemon.state.stringValue
+            metrics.append(["key": "daemon_state", "label": "Daemon State", "value": stateStr, "type": "text"])
+
+            // Uptime (from stats start time)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            if let data = try? encoder.encode(stats),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let startTime = dict["startTime"] as? String {
+                let fmt = ISO8601DateFormatter()
+                if let start = fmt.date(from: startTime) {
+                    let uptime = Int(Date().timeIntervalSince(start))
+                    metrics.append(["key": "uptime_seconds", "label": "Uptime", "value": uptime, "unit": "seconds"])
+                }
+            }
+
+            // Memory usage
+            let memBytes = ProcessInfo.processInfo.physicalMemory
+            let taskInfo = ProcessInfo.processInfo
+            metrics.append(["key": "system_memory_gb", "label": "System Memory", "value": Double(memBytes) / 1_073_741_824.0, "unit": "GB"])
+
+            // Daemon stats
+            if let data = try? encoder.encode(stats),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let fetched = dict["totalFetched"] as? Int {
+                    metrics.append(["key": "total_fetched", "label": "Questions Fetched", "value": fetched, "unit": "count", "type": "counter"])
+                }
+                if let added = dict["questionsAdded"] as? Int {
+                    metrics.append(["key": "questions_added", "label": "Questions Added", "value": added, "unit": "count", "type": "counter"])
+                }
+                if let dupes = dict["duplicatesSkipped"] as? Int {
+                    metrics.append(["key": "duplicates_skipped", "label": "Duplicates Skipped", "value": dupes, "unit": "count", "type": "counter"])
+                }
+                if let errors = dict["errors"] as? Int {
+                    metrics.append(["key": "errors", "label": "Errors", "value": errors, "unit": "count", "color": errors > 0 ? "red" : "green"])
+                }
+                // Provider status
+                if let providers = dict["providers"] as? [[String: Any]] {
+                    for p in providers {
+                        let name = p["name"] as? String ?? "unknown"
+                        let enabled = p["enabled"] as? Bool ?? false
+                        let pFetched = p["fetched"] as? Int ?? 0
+                        metrics.append(["key": "provider_\(name.lowercased())_fetched", "label": "\(name) Fetched", "value": pFetched, "unit": "count",
+                                        "color": enabled ? "cyan" : "white"])
+                    }
+                }
+            }
+
+            // SQLite stats
+            if let db = triviaDB {
+                do {
+                    let dbStats = try db.stats()
+                    metrics.append(["key": "db_questions", "label": "DB Questions", "value": dbStats.totalQuestions, "unit": "count"])
+                    metrics.append(["key": "db_categories", "label": "DB Categories", "value": dbStats.totalCategories, "unit": "count"])
+                    metrics.append(["key": "db_sources", "label": "DB Sources", "value": dbStats.totalSources, "unit": "count"])
+                } catch {
+                    logger.warning("Failed to get SQLite stats for /metrics: \(error)")
+                }
+            }
+
+            let server: [String: Any] = ["name": "Alities Engine", "uptime_seconds": 0]
+            return (200, ["server": server, "metrics": metrics])
+
         case (.GET, "/status"):
             let stats = await daemon.getExportedStats()
             let encoder = JSONEncoder()
