@@ -35,7 +35,12 @@ final class FileImportProvider: TriviaProvider {
 
         processedFiles.insert(file.lastPathComponent)
         let destination = processedDirectory.appendingPathComponent(file.lastPathComponent)
-        try? fileManager.moveItem(at: file, to: destination)
+        do {
+            try fileManager.moveItem(at: file, to: destination)
+        } catch {
+            // Log but don't fail — the file is already in processedFiles set so it won't be re-imported
+            FileHandle.standardError.write(Data("Warning: Failed to move \(file.lastPathComponent) to processed/: \(error.localizedDescription)\n".utf8))
+        }
 
         return Array(questions.prefix(count))
     }

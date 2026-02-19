@@ -26,7 +26,7 @@ actor TriviaGenDaemon {
         self.logger = logger
         self.httpClient = httpClient
         self.db = db
-        self.similarity = SimilarityService(httpClient: httpClient, openAIKey: config.openAIKey)
+        self.similarity = SimilarityService(httpClient: httpClient, openAIKey: config.openAIKey, logger: logger)
         self.stats = DaemonStats()
 
         self.providers = [
@@ -213,7 +213,11 @@ actor TriviaGenDaemon {
             await processProviders()
             if config.outputFile != nil { writeOutputFile() }
             writeStatsFile()
-            try? await Task.sleep(nanoseconds: UInt64(config.cycleIntervalSeconds) * 1_000_000_000)
+            // Sleep in 1-second increments so shutdown signals are responsive
+            for _ in 0..<config.cycleIntervalSeconds {
+                guard state == .running else { break }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
         }
     }
 

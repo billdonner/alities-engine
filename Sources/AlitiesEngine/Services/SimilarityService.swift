@@ -1,18 +1,23 @@
 import Foundation
 import AsyncHTTPClient
 import NIOCore
+import Logging
 
 /// Service for detecting duplicate/similar questions using AI and text comparison
 actor SimilarityService {
     private let httpClient: HTTPClient
     private let openAIKey: String?
+    private let logger: Logger
     private var questionSignatures: [String: UUID] = [:]
+    private var signatureOrder: [String] = []
+    private let maxCacheSize = 10_000
     private let textSimilarityThreshold: Double = 0.85
     private let aiSimilarityThreshold: Double = 0.8
 
-    init(httpClient: HTTPClient, openAIKey: String?) {
+    init(httpClient: HTTPClient, openAIKey: String?, logger: Logger) {
         self.httpClient = httpClient
         self.openAIKey = openAIKey
+        self.logger = logger
     }
 
     func findSimilar(_ question: TriviaQuestion, existingQuestions: [(id: UUID, text: String, answer: String)]) async -> UUID? {
@@ -49,10 +54,24 @@ actor SimilarityService {
     func register(_ question: TriviaQuestion, id: UUID) {
         let signature = generateSignature(question)
         questionSignatures[signature] = id
+        signatureOrder.append(signature)
+        evictIfNeeded()
     }
 
     func clearCache() {
         questionSignatures.removeAll()
+        signatureOrder.removeAll()
+    }
+
+    private func evictIfNeeded() {
+        guard questionSignatures.count > maxCacheSize else { return }
+        let evictCount = maxCacheSize / 4
+        let keysToRemove = Array(signatureOrder.prefix(evictCount))
+        for key in keysToRemove {
+            questionSignatures.removeValue(forKey: key)
+        }
+        signatureOrder.removeFirst(evictCount)
+        logger.debug("Evicted \(evictCount) entries from similarity cache (now \(questionSignatures.count))")
     }
 
     private func generateSignature(_ question: TriviaQuestion) -> String {
@@ -127,7 +146,7 @@ actor SimilarityService {
                 return candidates[matchIndex - 1].id
             }
         } catch {
-            // Silently fail AI check
+            logger.debug("AI similarity check failed: \(error.localizedDescription)")
         }
 
         return nil

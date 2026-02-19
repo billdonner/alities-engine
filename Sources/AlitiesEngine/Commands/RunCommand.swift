@@ -142,9 +142,10 @@ struct RunCommand: AsyncParsableCommand {
         signal(SIGINT, SIG_IGN)
         signalSource.setEventHandler {
             Task {
-                logger.info("Received SIGINT, shutting down...")
+                logger.info("Received SIGINT, shutting down gracefully...")
                 await daemon.stop()
-                Foundation.exit(0)
+                // daemon.stop() sets state to .stopped, causing runLoop to exit
+                // and run() to return normally with defer cleanup
             }
         }
         signalSource.resume()
@@ -153,9 +154,8 @@ struct RunCommand: AsyncParsableCommand {
         signal(SIGTERM, SIG_IGN)
         sigTermSource.setEventHandler {
             Task {
-                logger.info("Received SIGTERM, shutting down...")
+                logger.info("Received SIGTERM, shutting down gracefully...")
                 await daemon.stop()
-                Foundation.exit(0)
             }
         }
         sigTermSource.resume()

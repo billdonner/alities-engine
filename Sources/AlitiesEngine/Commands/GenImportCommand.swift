@@ -74,7 +74,7 @@ struct GenImportCommand: AsyncParsableCommand {
             var added = 0
             var skipped = 0
 
-            let similarity = SimilarityService(httpClient: httpClient, openAIKey: nil)
+            let similarity = SimilarityService(httpClient: httpClient, openAIKey: nil, logger: logger)
             let existingQuestions = try await dbService.getExistingQuestions()
 
             for question in questions {

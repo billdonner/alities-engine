@@ -144,7 +144,11 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                   let categories = json["categories"] as? [String] else {
                 return (400, ["error": "Request body must include 'categories' array"])
             }
-            let count = json["count"] as? Int ?? 50
+            guard !categories.isEmpty else {
+                return (400, ["error": "'categories' array must not be empty"])
+            }
+            let rawCount = json["count"] as? Int ?? 50
+            let count = max(1, min(rawCount, 1000))
             let harvestId = UUID().uuidString.prefix(8).lowercased()
 
             // Fire off harvest in background
@@ -167,12 +171,11 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             return (200, ["state": "running"])
 
         case (.POST, "/stop"):
-            // Schedule stop after responding
+            // Schedule stop after responding — daemon.stop() sets state to .stopped
+            // which causes runLoop to exit, allowing normal program termination with defers
             Task {
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay for response
                 await daemon.stop()
-                try? FileManager.default.removeItem(atPath: "/tmp/alities-engine.port")
-                Foundation.exit(0)
             }
             return (200, ["state": "stopping"])
 
