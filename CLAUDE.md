@@ -130,8 +130,8 @@ Sources/AlitiesEngine/
 
 This is a satellite repo of the alities ecosystem:
 - Hub: `~/alities` — specs and orchestration
-- Studio: `~/alities-studio` — web designer (not yet created)
-- Mobile: `~/alities-mobile` — iOS player (not yet created)
+- Studio: `~/alities-studio` — React/TypeScript web app (calls `/status`, `/categories`)
+- Mobile: `~/alities-mobile` — SwiftUI iOS game player (calls `/status`, `/categories`, `/gamedata`)
 
 ## HTTP API Endpoints
 
