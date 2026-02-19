@@ -149,7 +149,7 @@ struct MigrateCommand: AsyncParsableCommand {
                 if let cached = sourceCache[sourceName] {
                     sourceId = cached
                 } else {
-                    sourceId = try await pgService.getOrCreateSource(name: sourceName, type: "import")
+                    sourceId = try await pgService.getOrCreateSource(name: sourceName, type: "manual")
                     sourceCache[sourceName] = sourceId
                 }
 
@@ -173,7 +173,7 @@ struct MigrateCommand: AsyncParsableCommand {
                 inserted += 1
 
             } catch {
-                logger.error("Failed to insert question \(index + 1): \(error.localizedDescription)")
+                logger.error("Failed to insert question \(index + 1): \(error)")
                 errors += 1
             }
         }
