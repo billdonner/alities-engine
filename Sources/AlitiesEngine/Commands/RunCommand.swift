@@ -88,7 +88,7 @@ struct RunCommand: AsyncParsableCommand {
         var connection: PostgresConnection? = nil
 
         if !dryRun {
-            logger.info("Database: \(dbUser)@\(dbHost):\(dbPort)/\(dbName)")
+            logger.info("Database: \(dbUser)@\(dbHost):\(dbPort)/\(dbName) (password hidden)")
             logger.info("Connecting to database...")
             let dbConfig = PostgresConnection.Configuration(
                 host: dbHost, port: dbPort,
@@ -178,9 +178,9 @@ struct RunCommand: AsyncParsableCommand {
         if dryRun {
             writeMode = "DRY-RUN"
             logger.info("DRY RUN MODE: No questions will be written")
-        } else if dbService != nil && outputFile != nil {
+        } else if dbService != nil, let outputFile {
             writeMode = "DUAL-WRITE"
-            logger.info("DUAL-WRITE MODE: Writing to both PostgreSQL and \(outputFile!)")
+            logger.info("DUAL-WRITE MODE: Writing to both PostgreSQL and \(outputFile)")
         } else if let outputFile {
             writeMode = "FILE-ONLY"
             logger.info("FILE OUTPUT MODE: Writing questions to \(outputFile)")
