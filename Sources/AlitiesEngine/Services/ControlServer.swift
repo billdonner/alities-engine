@@ -153,7 +153,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             // Daemon state
             let stats = await daemon.getExportedStats()
             let stateStr = await daemon.state.stringValue
-            metrics.append(["key": "daemon_state", "label": "Daemon State", "value": stateStr, "type": "text"])
+            metrics.append(["key": "daemon_state", "label": "Daemon State", "value": stateStr])
 
             // Uptime (from stats start time)
             let encoder = JSONEncoder()
@@ -177,16 +177,16 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             if let data = try? encoder.encode(stats),
                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let fetched = dict["totalFetched"] as? Int {
-                    metrics.append(["key": "total_fetched", "label": "Questions Fetched", "value": fetched, "unit": "count", "type": "counter"])
+                    metrics.append(["key": "total_fetched", "label": "Questions Fetched", "value": fetched, "unit": "count"])
                 }
                 if let added = dict["questionsAdded"] as? Int {
-                    metrics.append(["key": "questions_added", "label": "Questions Added", "value": added, "unit": "count", "type": "counter"])
+                    metrics.append(["key": "questions_added", "label": "Questions Added", "value": added, "unit": "count"])
                 }
                 if let dupes = dict["duplicatesSkipped"] as? Int {
-                    metrics.append(["key": "duplicates_skipped", "label": "Duplicates Skipped", "value": dupes, "unit": "count", "type": "counter"])
+                    metrics.append(["key": "duplicates_skipped", "label": "Duplicates Skipped", "value": dupes, "unit": "count"])
                 }
                 if let errors = dict["errors"] as? Int {
-                    metrics.append(["key": "errors", "label": "Errors", "value": errors, "unit": "count", "color": errors > 0 ? "red" : "green"])
+                    metrics.append(["key": "errors", "label": "Errors", "value": errors, "unit": "count", "warn_above": 0])
                 }
                 // Provider status
                 if let providers = dict["providers"] as? [[String: Any]] {
@@ -194,8 +194,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                         let name = p["name"] as? String ?? "unknown"
                         let enabled = p["enabled"] as? Bool ?? false
                         let pFetched = p["fetched"] as? Int ?? 0
-                        metrics.append(["key": "provider_\(name.lowercased())_fetched", "label": "\(name) Fetched", "value": pFetched, "unit": "count",
-                                        "color": enabled ? "cyan" : "white"])
+                        metrics.append(["key": "provider_\(name.lowercased())_fetched", "label": "\(name) Fetched", "value": pFetched, "unit": "count"])
                     }
                 }
             }
@@ -212,8 +211,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                 }
             }
 
-            let server: [String: Any] = ["name": "Alities Engine", "uptime_seconds": 0]
-            return (200, ["server": server, "metrics": metrics])
+            return (200, ["metrics": metrics])
 
         case (.GET, "/status"):
             let stats = await daemon.getExportedStats()
