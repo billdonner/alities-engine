@@ -208,14 +208,10 @@ struct RunCommand: AsyncParsableCommand {
             try await server.start(eventLoopGroup: eventLoopGroup)
             controlServer = server
         }
-        defer {
-            if let controlServer {
-                Task { await controlServer.stop() }
-            }
-        }
 
-        let controlLine = port > 0 ? "║  Control: http://\(host):\(String(format: "%-5d", port))              ║" : "║  Control: disabled                           ║"
-        let modeLine = "║  Mode: \(String(format: "%-10s", writeMode))                             ║"
+
+        let controlLine = port > 0 ? "║  Control: http://\(host):\(port)\(String(repeating: " ", count: max(0, 5 - String(port).count)))              ║" : "║  Control: disabled                           ║"
+        let modeLine = "║  Mode: \(writeMode)\(String(repeating: " ", count: max(0, 10 - writeMode.count)))                             ║"
 
         logger.info("""
 
@@ -224,8 +220,8 @@ struct RunCommand: AsyncParsableCommand {
         ╠══════════════════════════════════════════════╣
         ║  Press Ctrl+C to stop                        ║
         ║  Send SIGUSR1 to pause/resume                ║
-        ║  Cycle interval: \(String(format: "%3d", interval)) seconds                  ║
-        ║  Batch size: \(String(format: "%3d", batchSize)) questions                   ║
+        ║  Cycle interval: \(String(repeating: " ", count: max(0, 3 - String(interval).count)))\(interval) seconds                  ║
+        ║  Batch size: \(String(repeating: " ", count: max(0, 3 - String(batchSize).count)))\(batchSize) questions                   ║
         \(modeLine)
         \(controlLine)
         ╚══════════════════════════════════════════════╝
@@ -233,6 +229,11 @@ struct RunCommand: AsyncParsableCommand {
         """)
 
         await daemon.start()
+
+        // Clean up control server before defer blocks shut down the event loop
+        if let controlServer {
+            await controlServer.stop()
+        }
     }
 }
 
