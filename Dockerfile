@@ -16,6 +16,7 @@ RUN swift build -c release --static-swift-stdlib
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    libcurl4 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/.build/release/AlitiesEngine /usr/local/bin/alities-engine
