@@ -8,9 +8,9 @@ RUN npm ci && npm run build
 FROM ubuntu:24.04 AS sqlite-builder
 RUN apt-get update && apt-get install -y --no-install-recommends wget gcc make libc6-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /sqlite
-RUN wget -q https://www.sqlite.org/2024/sqlite-autoconf-3450300.tar.gz && \
-    tar xzf sqlite-autoconf-3450300.tar.gz && \
-    cd sqlite-autoconf-3450300 && \
+RUN wget -q https://sqlite.org/2024/sqlite-autoconf-3460000.tar.gz && \
+    tar xzf sqlite-autoconf-3460000.tar.gz && \
+    cd sqlite-autoconf-3460000 && \
     CFLAGS="-DSQLITE_ENABLE_SNAPSHOT -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1 -O2" \
     ./configure --prefix=/usr/local && \
     make -j$(nproc) && make install
