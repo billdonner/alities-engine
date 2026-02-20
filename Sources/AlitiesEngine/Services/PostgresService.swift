@@ -20,7 +20,7 @@ actor PostgresService {
             logger: logger
         )
 
-        for try await (id,) in rows.decode(UUID.self) {
+        for try await id in rows.decode(UUID.self) {
             return id
         }
 
@@ -60,7 +60,7 @@ actor PostgresService {
             logger: logger
         )
 
-        for try await (id,) in rows.decode(UUID.self) {
+        for try await id in rows.decode(UUID.self) {
             return id
         }
 
@@ -167,7 +167,7 @@ actor PostgresService {
             "SELECT text FROM questions",
             logger: logger
         )
-        for try await (text,) in rows.decode(String.self) {
+        for try await text in rows.decode(String.self) {
             let normalized = text.lowercased()
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
@@ -182,7 +182,7 @@ actor PostgresService {
             logger: logger
         )
 
-        for try await (count,) in rows.decode(Int.self) {
+        for try await count in rows.decode(Int.self) {
             return count
         }
 
