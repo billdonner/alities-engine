@@ -4,37 +4,22 @@ WORKDIR /studio
 COPY studio/ ./
 RUN npm ci && npm run build
 
-# Stage 2: Build SQLite with snapshot support
-FROM ubuntu:24.04 AS sqlite-builder
-RUN apt-get update && apt-get install -y --no-install-recommends wget gcc make libc6-dev && rm -rf /var/lib/apt/lists/*
-WORKDIR /sqlite
-RUN wget -q https://sqlite.org/2024/sqlite-autoconf-3460000.tar.gz && \
-    tar xzf sqlite-autoconf-3460000.tar.gz && \
-    cd sqlite-autoconf-3460000 && \
-    CFLAGS="-DSQLITE_ENABLE_SNAPSHOT -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1 -O2" \
-    ./configure --prefix=/usr/local && \
-    make -j$(nproc) && make install
-
-# Stage 3: Build engine
+# Stage 2: Build engine
 FROM swift:6.0-noble AS builder
-COPY --from=sqlite-builder /usr/local/lib/libsqlite3* /usr/local/lib/
-COPY --from=sqlite-builder /usr/local/include/sqlite3*.h /usr/local/include/
-COPY --from=sqlite-builder /usr/local/lib/pkgconfig/sqlite3.pc /usr/local/lib/pkgconfig/
-RUN ldconfig
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Package.swift Package.resolved ./
 COPY Sources/ Sources/
 COPY Tests/ Tests/
-RUN swift build -c release --static-swift-stdlib
+RUN swift build -c release
 
-# Stage 4: Runtime
-FROM ubuntu:24.04
+# Stage 3: Runtime (use Swift image for runtime libraries)
+FROM swift:6.0-noble-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsqlite3-0 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=sqlite-builder /usr/local/lib/libsqlite3.so* /usr/local/lib/
-RUN ldconfig
 COPY --from=builder /app/.build/release/AlitiesEngine /usr/local/bin/alities-engine
 COPY --from=studio-builder /studio/dist /app/public
 
