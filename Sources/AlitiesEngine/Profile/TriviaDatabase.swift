@@ -1,6 +1,10 @@
 import Foundation
 import GRDB
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+import Crypto
+#endif
 
 // MARK: - Database Records
 

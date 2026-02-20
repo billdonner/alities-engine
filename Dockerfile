@@ -5,7 +5,8 @@ COPY studio/ ./
 RUN npm ci && npm run build
 
 # Stage 2: Build engine
-FROM swift:5.9-jammy AS builder
+FROM swift:6.0-jammy AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Package.swift Package.resolved ./
 COPY Sources/ Sources/

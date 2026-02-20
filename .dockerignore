@@ -1,7 +1,8 @@
 .build/
 .git/
-Tests/
 DerivedData/
 .swiftpm/
 *.xcodeproj
 .DS_Store
+studio/node_modules/
+studio/.git/

@@ -16,6 +16,8 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
         // NIO (already resolved as transitive dep, added here to expose NIOHTTP1)
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.94.0"),
+        // Crypto (CryptoKit replacement on Linux)
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
     ],
     targets: [
         .executableTarget(
@@ -27,6 +29,7 @@ let package = Package(
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
         .testTarget(
