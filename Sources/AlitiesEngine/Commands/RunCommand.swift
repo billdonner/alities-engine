@@ -14,19 +14,19 @@ struct RunCommand: AsyncParsableCommand {
     )
 
     @Option(name: .long, help: "Database host")
-    var dbHost: String = "localhost"
+    var dbHost: String = ProcessInfo.processInfo.environment["DB_HOST"] ?? "localhost"
 
     @Option(name: .long, help: "Database port")
-    var dbPort: Int = 5432
+    var dbPort: Int = Int(ProcessInfo.processInfo.environment["DB_PORT"] ?? "5432") ?? 5432
 
     @Option(name: .long, help: "Database user")
-    var dbUser: String = "trivia"
+    var dbUser: String = ProcessInfo.processInfo.environment["DB_USER"] ?? "trivia"
 
     @Option(name: .long, help: "Database password")
-    var dbPassword: String = "trivia"
+    var dbPassword: String = ProcessInfo.processInfo.environment["DB_PASSWORD"] ?? "trivia"
 
     @Option(name: .long, help: "Database name")
-    var dbName: String = "trivia_db"
+    var dbName: String = ProcessInfo.processInfo.environment["DB_NAME"] ?? "trivia_db"
 
     @Option(name: .long, help: "OpenAI API key for AI generation")
     var openaiKey: String?
