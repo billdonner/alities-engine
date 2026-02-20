@@ -17,7 +17,7 @@ final class GameDataTransformerTests: XCTestCase {
                 difficulty: .easy,
                 explanation: "Basic arithmetic",
                 hint: "Even number",
-                source: "OpenTriviaDB"
+                source: "AI Generated"
             ),
         ]
 
@@ -33,7 +33,7 @@ final class GameDataTransformerTests: XCTestCase {
         XCTAssertEqual(challenge.correct, "4")
         XCTAssertEqual(challenge.explanation, "Basic arithmetic")
         XCTAssertEqual(challenge.hint, "Even number")
-        XCTAssertEqual(challenge.aisource, "opentdb")
+        XCTAssertEqual(challenge.aisource, "openai")
     }
 
     func testTransformUsesTopicPicMapping() {

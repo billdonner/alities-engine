@@ -30,11 +30,7 @@ actor TriviaGenDaemon {
         self.stats = DaemonStats()
 
         self.providers = [
-            OpenTriviaDBProvider(httpClient: httpClient),
-            TheTriviaAPIProvider(httpClient: httpClient),
-            JServiceProvider(httpClient: httpClient),
-            AIGeneratorProvider(httpClient: httpClient, apiKey: config.openAIKey),
-            FileImportProvider(watchDirectory: config.importDirectory)
+            AIGeneratorProvider(httpClient: httpClient, apiKey: config.openAIKey)
         ]
     }
 
@@ -348,7 +344,6 @@ struct DaemonConfig {
     let dbPassword: String
     let dbName: String
     let openAIKey: String?
-    let importDirectory: URL
     let cycleIntervalSeconds: Int
     let providerDelaySeconds: Int
     let batchSize: Int
@@ -364,7 +359,6 @@ struct DaemonConfig {
             dbPassword: ProcessInfo.processInfo.environment["DB_PASSWORD"] ?? "trivia",
             dbName: ProcessInfo.processInfo.environment["DB_NAME"] ?? "trivia_db",
             openAIKey: ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
-            importDirectory: URL(fileURLWithPath: ProcessInfo.processInfo.environment["IMPORT_DIR"] ?? "/tmp/trivia-import"),
             cycleIntervalSeconds: Int(ProcessInfo.processInfo.environment["CYCLE_INTERVAL"] ?? "60") ?? 60,
             providerDelaySeconds: Int(ProcessInfo.processInfo.environment["PROVIDER_DELAY"] ?? "5") ?? 5,
             batchSize: Int(ProcessInfo.processInfo.environment["BATCH_SIZE"] ?? "10") ?? 10,

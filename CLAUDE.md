@@ -39,7 +39,6 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 | `run` | trivia-gen-daemon | Start acquisition daemon (dual-write, file, or database mode) |
 | `list-providers` | trivia-gen-daemon | Show available trivia providers |
 | `status` | trivia-gen-daemon | Show daemon status |
-| `gen-import` | trivia-gen-daemon | Import file directly to PostgreSQL |
 | `import` | trivia-profile | Import JSON files to SQLite (with dedup) |
 | `export` | trivia-profile | Export from SQLite as raw or gamedata JSON |
 | `report` | trivia-profile | Profile trivia data (from files or SQLite) |
@@ -61,11 +60,7 @@ Sources/AlitiesEngine/
 │   └── Report.swift           # Report generation and rendering
 ├── Providers/
 │   ├── TriviaProvider.swift   # Protocol + errors
-│   ├── OpenTriviaDBProvider.swift
-│   ├── TheTriviaAPIProvider.swift
-│   ├── JServiceProvider.swift
-│   ├── AIGeneratorProvider.swift
-│   └── FileImportProvider.swift
+│   └── AIGeneratorProvider.swift
 ├── Services/
 │   ├── TriviaGenDaemon.swift  # Main daemon actor
 │   ├── PostgresService.swift  # PostgreSQL operations
@@ -77,7 +72,6 @@ Sources/AlitiesEngine/
 │   └── CategoryMap.swift      # Category normalization + SF Symbols
 └── Commands/
     ├── RunCommand.swift        # Daemon run + list-providers + status
-    ├── GenImportCommand.swift  # PostgreSQL import
     ├── ProfileImportCommand.swift  # SQLite import
     ├── ExportCommand.swift
     ├── ReportCommand.swift
@@ -92,11 +86,7 @@ Sources/AlitiesEngine/
 
 | Provider | Source | API Key Required |
 |----------|--------|-----------------|
-| OpenTriviaDB | opentdb.com | No |
-| TheTriviaAPI | the-trivia-api.com | No |
-| jService | the-trivia-api.com (category-focused) | No |
 | AI Generator | OpenAI GPT-4o-mini | Yes (OPENAI_API_KEY) |
-| File Import | Local JSON/CSV | No |
 
 ### Dual Database Architecture
 

@@ -11,7 +11,6 @@ struct AlitiesEngineCLI: AsyncParsableCommand {
             RunCommand.self,
             ListProvidersCommand.self,
             StatusCommand.self,
-            GenImportCommand.self,
             // Profile commands (from trivia-profile)
             ProfileImportCommand.self,
             ExportCommand.self,

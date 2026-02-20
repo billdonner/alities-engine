@@ -33,29 +33,14 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "OpenAI API key for AI generation")
     var openaiKey: String?
 
-    @Option(name: .long, help: "Directory to watch for import files")
-    var importDir: String = "/tmp/trivia-import"
-
     @Option(name: .long, help: "Seconds between acquisition cycles")
     var interval: Int = 60
 
     @Option(name: .long, help: "Questions per batch")
     var batchSize: Int = 10
 
-    @Flag(name: .long, help: "Disable OpenTriviaDB provider")
-    var noOpentdb: Bool = false
-
-    @Flag(name: .long, help: "Disable TheTriviaAPI provider")
-    var noTriviaapi: Bool = false
-
-    @Flag(name: .long, help: "Disable jService provider")
-    var noJservice: Bool = false
-
     @Flag(name: .long, help: "Disable AI generation provider")
     var noAi: Bool = false
-
-    @Flag(name: .long, help: "Disable file import provider")
-    var noFileImport: Bool = false
 
     @Flag(name: .shortAndLong, help: "Verbose logging")
     var verbose: Bool = false
@@ -125,7 +110,6 @@ struct RunCommand: AsyncParsableCommand {
             dbHost: dbHost, dbPort: dbPort,
             dbUser: dbUser, dbPassword: dbPassword, dbName: dbName,
             openAIKey: openaiKey ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
-            importDirectory: URL(fileURLWithPath: importDir),
             cycleIntervalSeconds: interval, providerDelaySeconds: 5,
             batchSize: batchSize, similarityCheckLimit: 1000,
             dryRun: dryRun,
@@ -134,11 +118,7 @@ struct RunCommand: AsyncParsableCommand {
 
         let daemon = TriviaGenDaemon(config: config, db: dbService, httpClient: httpClient, logger: logger)
 
-        if noOpentdb { await daemon.disableProvider("OpenTriviaDB") }
-        if noTriviaapi { await daemon.disableProvider("TheTriviaAPI") }
-        if noJservice { await daemon.disableProvider("jService") }
         if noAi { await daemon.disableProvider("AI Generator") }
-        if noFileImport { await daemon.disableProvider("File Import") }
 
         // Setup signal handling
         let signalSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
@@ -246,25 +226,14 @@ struct ListProvidersCommand: ParsableCommand {
     )
 
     mutating func run() throws {
-        let providers: [(name: String, source: String, requiresKey: Bool)] = [
-            ("OpenTriviaDB", "opentdb.com", false),
-            ("TheTriviaAPI", "the-trivia-api.com", false),
-            ("jService", "the-trivia-api.com (history, science, geography, culture, arts)", false),
-            ("AI Generator", "OpenAI GPT-4", true),
-            ("File Import", "Local JSON/CSV files", false),
-        ]
-
         print("")
         print("Available Trivia Providers:")
         print("───────────────────────────────────────────────────")
-        for p in providers {
-            let keyNote = p.requiresKey ? " (requires OPENAI_API_KEY)" : ""
-            print("  \(p.name)")
-            print("    Source: \(p.source)\(keyNote)")
-        }
+        print("  AI Generator")
+        print("    Source: OpenAI GPT-4 (requires OPENAI_API_KEY)")
         print("───────────────────────────────────────────────────")
         print("")
-        print("Disable a provider with: alities-engine run --no-opentdb, --no-ai, --no-file-import")
+        print("Disable with: alities-engine run --no-ai")
         print("")
     }
 }

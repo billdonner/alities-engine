@@ -20,11 +20,6 @@ final class DaemonConfigTests: XCTestCase {
         XCTAssertNil(config.outputFile)
     }
 
-    func testFromEnvironmentImportDirectory() {
-        let config = DaemonConfig.fromEnvironment()
-        XCTAssertTrue(config.importDirectory.path.contains("trivia-import"))
-    }
-
     // MARK: - Manual Config
 
     func testManualConfigPreservesAllFields() {
@@ -32,7 +27,6 @@ final class DaemonConfigTests: XCTestCase {
             dbHost: "db.example.com", dbPort: 5433,
             dbUser: "admin", dbPassword: "secret", dbName: "my_db",
             openAIKey: "sk-test123",
-            importDirectory: URL(fileURLWithPath: "/tmp/import"),
             cycleIntervalSeconds: 120, providerDelaySeconds: 10,
             batchSize: 50, similarityCheckLimit: 500,
             dryRun: true,

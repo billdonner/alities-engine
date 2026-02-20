@@ -62,12 +62,7 @@ final class TriviaQuestionTests: XCTestCase {
     }
 
     func testAisourceMapping() {
-        XCTAssertEqual(makeTriviaQuestion(source: "OpenTriviaDB").aisource, "opentdb")
-        XCTAssertEqual(makeTriviaQuestion(source: "opentdb").aisource, "opentdb")
-        XCTAssertEqual(makeTriviaQuestion(source: "TheTriviaAPI").aisource, "thetriviaapi")
-        XCTAssertEqual(makeTriviaQuestion(source: "jService").aisource, "jservice")
         XCTAssertEqual(makeTriviaQuestion(source: "AI Generated").aisource, "openai")
-        XCTAssertEqual(makeTriviaQuestion(source: "File Import").aisource, "fileimport")
         XCTAssertEqual(makeTriviaQuestion(source: "Custom Source").aisource, "customsource")
     }
 
@@ -98,7 +93,7 @@ final class TriviaQuestionTests: XCTestCase {
     private func makeTriviaQuestion(
         text: String = "What is the capital of France?",
         correctIndex: Int = 2,
-        source: String = "OpenTriviaDB"
+        source: String = "AI Generated"
     ) -> TriviaQuestion {
         TriviaQuestion(
             text: text,

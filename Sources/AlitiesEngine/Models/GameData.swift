@@ -117,16 +117,8 @@ enum TopicPicMapping {
 extension TriviaQuestion {
     var aisource: String {
         switch source.lowercased() {
-        case let s where s.contains("opentriviadb") || s.contains("opentdb"):
-            return "opentdb"
-        case let s where s.contains("thetriviaapi"):
-            return "thetriviaapi"
-        case let s where s.contains("jservice"):
-            return "jservice"
         case let s where s.contains("ai generated"):
             return "openai"
-        case let s where s.contains("file import"):
-            return "fileimport"
         default:
             return source.lowercased().replacingOccurrences(of: " ", with: "")
         }
