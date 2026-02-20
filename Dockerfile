@@ -8,6 +8,7 @@ RUN npm ci && npm run build
 FROM swift:6.0-noble AS builder
 WORKDIR /app
 COPY Package.swift Package.resolved ./
+RUN swift package resolve
 COPY Sources/ Sources/
 COPY Tests/ Tests/
 RUN swift build -c release --static-swift-stdlib
