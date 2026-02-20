@@ -102,6 +102,7 @@ Sources/AlitiesEngine/
 - SHA-256 hash dedup in SQLite; Jaccard + AI similarity dedup in PostgreSQL
 - `DatabaseService` renamed to `PostgresService` to avoid confusion with GRDB's `TriviaDatabase`
 - HTTP control server on `localhost:9847` (configurable via `--port` and `--host`) for daemon control
+- Control server endpoints (`/categories`, `/gamedata`, `/metrics`, `/import`) read from PostgreSQL (not SQLite) — single source of truth
 - `--static-dir` serves alities-studio production build as static files (SPA fallback to index.html for extensionless paths); eliminates CORS and avoids a second Fly.io instance
 - Port file written to `/tmp/alities-engine.port` for CLI auto-discovery
 - Bearer token auth on destructive POST endpoints via `CONTROL_API_KEY` env var

@@ -5,8 +5,6 @@ import AsyncHTTPClient
 import PostgresNIO
 import NIOCore
 import NIOPosix
-import GRDB
-
 // MARK: - Run Command (daemon)
 
 struct RunCommand: AsyncParsableCommand {
@@ -57,7 +55,7 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Control server bind address")
     var host: String = "127.0.0.1"
 
-    @Option(name: .long, help: "SQLite database path for control server operations")
+    @Option(name: .long, help: "SQLite database path (for local CLI commands only)")
     var db: String = "~/trivia.db"
 
     @Option(name: .long, help: "Directory for static web files (e.g. alities-studio dist)")
@@ -177,21 +175,12 @@ struct RunCommand: AsyncParsableCommand {
 
         // Start control server
         var controlServer: ControlServer? = nil
-        var triviaDB: TriviaDatabase? = nil
         if port > 0 {
-            let dbPath = NSString(string: db).expandingTildeInPath
-            do {
-                triviaDB = try TriviaDatabase(path: dbPath)
-                logger.info("SQLite database opened at \(dbPath)")
-            } catch {
-                logger.warning("Could not open SQLite database at \(dbPath): \(error.localizedDescription)")
-            }
-
             let resolvedStaticDir = staticDir.map { NSString(string: $0).expandingTildeInPath }
             if let dir = resolvedStaticDir {
                 logger.info("Serving static files from \(dir)")
             }
-            let server = ControlServer(daemon: daemon, triviaDB: triviaDB, host: host, port: port, logger: logger, staticDirectory: resolvedStaticDir)
+            let server = ControlServer(daemon: daemon, db: dbService, host: host, port: port, logger: logger, staticDirectory: resolvedStaticDir)
             try await server.start(eventLoopGroup: eventLoopGroup)
             controlServer = server
         }

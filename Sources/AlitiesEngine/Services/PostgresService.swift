@@ -176,6 +176,90 @@ actor PostgresService {
         return texts
     }
 
+    // MARK: - Control Server Queries
+
+    /// Categories with question counts (for /categories endpoint)
+    struct CategoryWithCount: Sendable {
+        let name: String
+        let count: Int
+    }
+
+    func categoriesWithCounts() async throws -> [CategoryWithCount] {
+        var result: [CategoryWithCount] = []
+        let rows = try await connection.query(
+            """
+            SELECT c.name, COUNT(q.id)::int as count
+            FROM categories c
+            LEFT JOIN questions q ON q.category_id = c.id
+            GROUP BY c.id, c.name
+            ORDER BY count DESC
+            """,
+            logger: logger
+        )
+        for try await (name, count) in rows.decode((String, Int).self) {
+            result.append(CategoryWithCount(name: name, count: count))
+        }
+        return result
+    }
+
+    /// All questions with category/source info (for /gamedata endpoint)
+    func allQuestionsProfiled() async throws -> [ProfiledQuestion] {
+        var result: [ProfiledQuestion] = []
+        let rows = try await connection.query(
+            """
+            SELECT q.text, q.choices::text, q.correct_choice_index, c.name,
+                   q.difficulty::text, q.explanation, q.hint, qs.name
+            FROM questions q
+            JOIN categories c ON c.id = q.category_id
+            LEFT JOIN question_sources qs ON qs.id = q.source_id
+            ORDER BY q.created_at DESC
+            """,
+            logger: logger
+        )
+        for try await (text, choicesJson, correctIndex, categoryName, difficulty, explanation, hint, sourceName)
+            in rows.decode((String, String, Int, String, String?, String?, String?, String?).self) {
+            var answers: [String] = []
+            var correctAnswer = ""
+            if let data = choicesJson.data(using: .utf8),
+               let wrapper = try? JSONDecoder().decode(PGChoicesWrapper.self, from: data) {
+                answers = wrapper.items.map { $0.text }
+                if correctIndex >= 0 && correctIndex < wrapper.items.count {
+                    correctAnswer = wrapper.items[correctIndex].text
+                }
+            }
+            result.append(ProfiledQuestion(
+                question: text,
+                answers: answers,
+                correctAnswer: correctAnswer,
+                correctIndex: correctIndex,
+                category: categoryName,
+                difficulty: difficulty,
+                explanation: explanation,
+                hint: hint,
+                source: sourceName
+            ))
+        }
+        return result
+    }
+
+    /// Quick stats (for /metrics endpoint)
+    struct QuickStats: Sendable {
+        let totalQuestions: Int
+        let totalCategories: Int
+        let totalSources: Int
+    }
+
+    func stats() async throws -> QuickStats {
+        var totalQ = 0, totalC = 0, totalS = 0
+        let qRows = try await connection.query("SELECT COUNT(*)::int FROM questions", logger: logger)
+        for try await count in qRows.decode(Int.self) { totalQ = count }
+        let cRows = try await connection.query("SELECT COUNT(*)::int FROM categories", logger: logger)
+        for try await count in cRows.decode(Int.self) { totalC = count }
+        let sRows = try await connection.query("SELECT COUNT(*)::int FROM question_sources", logger: logger)
+        for try await count in sRows.decode(Int.self) { totalS = count }
+        return QuickStats(totalQuestions: totalQ, totalCategories: totalC, totalSources: totalS)
+    }
+
     func getQuestionCount() async throws -> Int {
         let rows = try await connection.query(
             "SELECT COUNT(*)::int FROM questions",

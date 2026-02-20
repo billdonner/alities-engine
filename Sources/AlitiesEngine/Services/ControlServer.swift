@@ -7,16 +7,16 @@ import Logging
 /// Lightweight HTTP control server for the running daemon
 final class ControlServer {
     private let daemon: TriviaGenDaemon
-    private let triviaDB: TriviaDatabase?
+    private let db: PostgresService?
     private let host: String
     private let port: Int
     private let logger: Logger
     private let staticDirectory: String?
     private var channel: Channel?
 
-    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, host: String = "127.0.0.1", port: Int, logger: Logger, staticDirectory: String? = nil) {
+    init(daemon: TriviaGenDaemon, db: PostgresService?, host: String = "127.0.0.1", port: Int, logger: Logger, staticDirectory: String? = nil) {
         self.daemon = daemon
-        self.triviaDB = triviaDB
+        self.db = db
         self.host = host
         self.port = port
         self.logger = logger
@@ -25,7 +25,7 @@ final class ControlServer {
 
     func start(eventLoopGroup: EventLoopGroup) async throws {
         let daemon = self.daemon
-        let triviaDB = self.triviaDB
+        let db = self.db
         let logger = self.logger
 
         let bootstrap = ServerBootstrap(group: eventLoopGroup)
@@ -34,7 +34,7 @@ final class ControlServer {
             .childChannelInitializer { [staticDirectory] channel in
                 channel.pipeline.configureHTTPServerPipeline().flatMap {
                     channel.pipeline.addHandler(
-                        ControlHTTPHandler(daemon: daemon, triviaDB: triviaDB, logger: logger, staticDirectory: staticDirectory)
+                        ControlHTTPHandler(daemon: daemon, db: db, logger: logger, staticDirectory: staticDirectory)
                     )
                 }
             }
@@ -70,7 +70,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
     typealias OutboundOut = HTTPServerResponsePart
 
     private let daemon: TriviaGenDaemon
-    private let triviaDB: TriviaDatabase?
+    private let db: PostgresService?
     private let logger: Logger
     private let staticDirectory: String?
 
@@ -80,9 +80,9 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
     private var requestHead: HTTPRequestHead?
     private var body = ByteBuffer()
 
-    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger, staticDirectory: String? = nil) {
+    init(daemon: TriviaGenDaemon, db: PostgresService?, logger: Logger, staticDirectory: String? = nil) {
         self.daemon = daemon
-        self.triviaDB = triviaDB
+        self.db = db
         self.logger = logger
         self.staticDirectory = staticDirectory
         self.apiKey = ProcessInfo.processInfo.environment["CONTROL_API_KEY"]
@@ -102,7 +102,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             let bodyData = body.readableBytes > 0 ? body.getData(at: body.readerIndex, length: body.readableBytes) : nil
 
             let daemon = self.daemon
-            let triviaDB = self.triviaDB
+            let db = self.db
             let logger = self.logger
             let apiKey = self.apiKey
             let path = head.uri.split(separator: "?").first.map(String.init) ?? head.uri
@@ -120,7 +120,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             let promise = context.eventLoop.makePromise(of: RouteResponse.self)
             promise.completeWithTask {
                 await Self.handleRoute(method: method, path: path, body: bodyData, headers: headers,
-                                       daemon: daemon, triviaDB: triviaDB, logger: logger, apiKey: apiKey,
+                                       daemon: daemon, db: db, logger: logger, apiKey: apiKey,
                                        staticDirectory: staticDirectory)
             }
             promise.futureResult.whenComplete { result in
@@ -159,7 +159,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
 
     private static func handleRoute(
         method: HTTPMethod, path: String, body: Data?, headers: HTTPHeaders,
-        daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger, apiKey: String?,
+        daemon: TriviaGenDaemon, db: PostgresService?, logger: Logger, apiKey: String?,
         staticDirectory: String?
     ) async -> RouteResponse {
 
@@ -193,7 +193,6 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
 
             // Memory usage
             let memBytes = ProcessInfo.processInfo.physicalMemory
-            let taskInfo = ProcessInfo.processInfo
             metrics.append(["key": "system_memory_gb", "label": "System Memory", "value": Double(memBytes) / 1_073_741_824.0, "unit": "GB"])
 
             // Daemon stats
@@ -215,22 +214,21 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                 if let providers = dict["providers"] as? [[String: Any]] {
                     for p in providers {
                         let name = p["name"] as? String ?? "unknown"
-                        let enabled = p["enabled"] as? Bool ?? false
                         let pFetched = p["fetched"] as? Int ?? 0
                         metrics.append(["key": "provider_\(name.lowercased())_fetched", "label": "\(name) Fetched", "value": pFetched, "unit": "count"])
                     }
                 }
             }
 
-            // SQLite stats
-            if let db = triviaDB {
+            // PostgreSQL stats
+            if let db = db {
                 do {
-                    let dbStats = try db.stats()
+                    let dbStats = try await db.stats()
                     metrics.append(["key": "db_questions", "label": "DB Questions", "value": dbStats.totalQuestions, "unit": "count"])
                     metrics.append(["key": "db_categories", "label": "DB Categories", "value": dbStats.totalCategories, "unit": "count"])
                     metrics.append(["key": "db_sources", "label": "DB Sources", "value": dbStats.totalSources, "unit": "count"])
                 } catch {
-                    logger.warning("Failed to get SQLite stats for /metrics: \(error)")
+                    logger.warning("Failed to get PostgreSQL stats for /metrics: \(error)")
                 }
             }
 
@@ -247,23 +245,23 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             return .json(200, ["state": await daemon.state.stringValue])
 
         case (.GET, "/categories"):
-            guard let db = triviaDB else {
-                return .json(503, ["error": "No SQLite database configured"])
+            guard let db = db else {
+                return .json(503, ["error": "No database configured"])
             }
             do {
-                let cats = try db.allCategories()
-                let list = cats.map { ["name": $0.name, "pic": $0.pic, "count": $0.count] as [String: Any] }
+                let cats = try await db.categoriesWithCounts()
+                let list = cats.map { ["name": $0.name, "pic": CategoryMap.symbol(for: $0.name), "count": $0.count] as [String: Any] }
                 return .json(200, ["categories": list, "total": cats.count])
             } catch {
                 return .json(500, ["error": error.localizedDescription])
             }
 
         case (.GET, "/gamedata"):
-            guard let db = triviaDB else {
-                return .json(503, ["error": "No SQLite database configured"])
+            guard let db = db else {
+                return .json(503, ["error": "No database configured"])
             }
             do {
-                let questions = try db.allQuestions()
+                let questions = try await db.allQuestionsProfiled()
                 let challenges = questions.map { q in
                     Challenge(
                         topic: q.category,
@@ -315,10 +313,6 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             Task {
                 let result = await daemon.harvestCategories(categories, count: count)
                 logger.info("Harvest \(harvestId) complete: fetched=\(result.fetched) added=\(result.added) errors=\(result.errors)")
-
-                if triviaDB != nil, result.added > 0 {
-                    logger.info("Harvest results will be available in next daemon cycle output")
-                }
             }
             return .json(202, ["accepted": true, "id": String(harvestId), "categories": categories, "count": count])
 
@@ -351,8 +345,8 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             guard isAuthorized(headers: headers, apiKey: apiKey) else {
                 return .json(401, ["error": "Unauthorized — Bearer token required"])
             }
-            guard let db = triviaDB else {
-                return .json(503, ["error": "No SQLite database configured"])
+            guard let db = db else {
+                return .json(503, ["error": "No database configured"])
             }
             guard let body = body,
                   let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
@@ -368,22 +362,13 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                 let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
                 let questions = try JSONDecoder().decode([TriviaQuestion].self, from: data)
                 var inserted = 0
-                var duplicates = 0
                 for q in questions {
-                    let catId = try db.getOrCreateCategory(name: q.category)
-                    let choices = q.choices.map { ChoiceEntry(text: $0.text, isCorrect: $0.isCorrect) }
-                    let result = try db.insertQuestion(
-                        text: q.text, choices: choices, correctIndex: q.correctChoiceIndex,
-                        categoryId: catId, difficulty: q.difficulty.rawValue,
-                        explanation: q.explanation, hint: q.hint,
-                        source: q.source, importedFrom: filePath
-                    )
-                    switch result {
-                    case .inserted: inserted += 1
-                    case .duplicate: duplicates += 1
-                    }
+                    let catId = try await db.getOrCreateCategory(name: q.category)
+                    let sourceId = try await db.getOrCreateSource(name: q.source ?? "import")
+                    _ = try await db.insertQuestion(q, categoryId: catId, sourceId: sourceId)
+                    inserted += 1
                 }
-                return .json(200, ["inserted": inserted, "duplicates": duplicates, "total": questions.count])
+                return .json(200, ["inserted": inserted, "total": questions.count])
             } catch {
                 return .json(500, ["error": "Import failed: \(error.localizedDescription)"])
             }

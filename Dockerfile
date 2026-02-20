@@ -23,11 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/.build/release/AlitiesEngine /usr/local/bin/alities-engine
 COPY --from=studio-builder /studio/dist /app/public
 
-# Data directory for SQLite
-RUN mkdir -p /data
-VOLUME /data
-
 EXPOSE 9847
 
 ENTRYPOINT ["alities-engine"]
-CMD ["run", "--host", "0.0.0.0", "--port", "9847", "--db", "/data/trivia.db", "--static-dir", "/app/public"]
+CMD ["run", "--host", "0.0.0.0", "--port", "9847", "--static-dir", "/app/public"]
