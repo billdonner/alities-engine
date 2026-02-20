@@ -19,7 +19,3 @@ primary_region = "ewr"
   method = "GET"
   timeout = "5s"
   path = "/health"
-
-[mounts]
-  source = "alities_data"
-  destination = "/data"
