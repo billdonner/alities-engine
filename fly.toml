@@ -1,4 +1,4 @@
-app = "alities-engine"
+app = "bd-alities-engine"
 primary_region = "ewr"
 
 [build]
