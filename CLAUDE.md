@@ -24,6 +24,7 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 - `swift run AlitiesEngine list-providers` — show available providers
 - `swift run AlitiesEngine categories` — list categories with counts
 - `swift run AlitiesEngine run --port 9847` — run daemon with HTTP control server
+- `swift run AlitiesEngine run --static-dir ~/alities-studio/dist` — serve studio web app from engine
 - `swift run AlitiesEngine harvest --categories Comics,Vehicles --count 50` — targeted AI generation
 - `swift run AlitiesEngine ctl status` — show running daemon status
 - `swift run AlitiesEngine ctl pause` / `resume` / `stop` — control daemon
@@ -101,6 +102,7 @@ Sources/AlitiesEngine/
 - SHA-256 hash dedup in SQLite; Jaccard + AI similarity dedup in PostgreSQL
 - `DatabaseService` renamed to `PostgresService` to avoid confusion with GRDB's `TriviaDatabase`
 - HTTP control server on `localhost:9847` (configurable via `--port` and `--host`) for daemon control
+- `--static-dir` serves alities-studio production build as static files (SPA fallback to index.html for extensionless paths); eliminates CORS and avoids a second Fly.io instance
 - Port file written to `/tmp/alities-engine.port` for CLI auto-discovery
 - Bearer token auth on destructive POST endpoints via `CONTROL_API_KEY` env var
 - CORS headers on all responses for studio web app compatibility
@@ -132,7 +134,9 @@ This is a satellite repo of the alities ecosystem:
 ## Docker & Deployment
 
 - `docker compose up` — run engine + PostgreSQL locally
-- `Dockerfile` — multi-stage build: `swift:5.9-jammy` → `ubuntu:22.04` runtime
+- `Dockerfile` — 3-stage build: `node:20-slim` (studio) → `swift:5.9-jammy` (engine) → `ubuntu:22.04` runtime
+- Studio static files served from `/app/public` via `--static-dir`
+- Before `docker build`, copy studio source: `cp -r ~/alities-studio studio/`
 - `fly.toml` — Fly.io deployment config (auto-TLS, persistent volumes)
 - Deploy: `flyctl deploy` (requires `flyctl auth login` first)
 - Health check: `curl https://alities-engine.fly.dev/health`

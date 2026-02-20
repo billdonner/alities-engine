@@ -60,6 +60,9 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "SQLite database path for control server operations")
     var db: String = "~/trivia.db"
 
+    @Option(name: .long, help: "Directory for static web files (e.g. alities-studio dist)")
+    var staticDir: String?
+
     mutating func run() async throws {
         var logger = Logger(label: "alities-engine")
         logger.logLevel = verbose ? .debug : .info
@@ -184,7 +187,11 @@ struct RunCommand: AsyncParsableCommand {
                 logger.warning("Could not open SQLite database at \(dbPath): \(error.localizedDescription)")
             }
 
-            let server = ControlServer(daemon: daemon, triviaDB: triviaDB, host: host, port: port, logger: logger)
+            let resolvedStaticDir = staticDir.map { NSString(string: $0).expandingTildeInPath }
+            if let dir = resolvedStaticDir {
+                logger.info("Serving static files from \(dir)")
+            }
+            let server = ControlServer(daemon: daemon, triviaDB: triviaDB, host: host, port: port, logger: logger, staticDirectory: resolvedStaticDir)
             try await server.start(eventLoopGroup: eventLoopGroup)
             controlServer = server
         }

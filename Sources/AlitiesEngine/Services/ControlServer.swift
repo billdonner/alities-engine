@@ -11,14 +11,16 @@ final class ControlServer {
     private let host: String
     private let port: Int
     private let logger: Logger
+    private let staticDirectory: String?
     private var channel: Channel?
 
-    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, host: String = "127.0.0.1", port: Int, logger: Logger) {
+    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, host: String = "127.0.0.1", port: Int, logger: Logger, staticDirectory: String? = nil) {
         self.daemon = daemon
         self.triviaDB = triviaDB
         self.host = host
         self.port = port
         self.logger = logger
+        self.staticDirectory = staticDirectory
     }
 
     func start(eventLoopGroup: EventLoopGroup) async throws {
@@ -29,10 +31,10 @@ final class ControlServer {
         let bootstrap = ServerBootstrap(group: eventLoopGroup)
             .serverChannelOption(.backlog, value: 256)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
-            .childChannelInitializer { channel in
+            .childChannelInitializer { [staticDirectory] channel in
                 channel.pipeline.configureHTTPServerPipeline().flatMap {
                     channel.pipeline.addHandler(
-                        ControlHTTPHandler(daemon: daemon, triviaDB: triviaDB, logger: logger)
+                        ControlHTTPHandler(daemon: daemon, triviaDB: triviaDB, logger: logger, staticDirectory: staticDirectory)
                     )
                 }
             }
@@ -53,6 +55,14 @@ final class ControlServer {
     }
 }
 
+// MARK: - Route Response
+
+private enum RouteResponse {
+    case json(Int, [String: Any])
+    case file(Data, String)  // data, contentType
+    case notFound
+}
+
 // MARK: - HTTP Handler
 
 private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
@@ -62,6 +72,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
     private let daemon: TriviaGenDaemon
     private let triviaDB: TriviaDatabase?
     private let logger: Logger
+    private let staticDirectory: String?
 
     /// API key for protecting destructive endpoints (from CONTROL_API_KEY env var)
     private let apiKey: String?
@@ -69,10 +80,11 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
     private var requestHead: HTTPRequestHead?
     private var body = ByteBuffer()
 
-    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger) {
+    init(daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger, staticDirectory: String? = nil) {
         self.daemon = daemon
         self.triviaDB = triviaDB
         self.logger = logger
+        self.staticDirectory = staticDirectory
         self.apiKey = ProcessInfo.processInfo.environment["CONTROL_API_KEY"]
     }
 
@@ -104,22 +116,32 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             }
 
             // Handle async route processing
-            let promise = context.eventLoop.makePromise(of: (Int, [String: Any]).self)
+            let staticDirectory = self.staticDirectory
+            let promise = context.eventLoop.makePromise(of: RouteResponse.self)
             promise.completeWithTask {
                 await Self.handleRoute(method: method, path: path, body: bodyData, headers: headers,
-                                       daemon: daemon, triviaDB: triviaDB, logger: logger, apiKey: apiKey)
+                                       daemon: daemon, triviaDB: triviaDB, logger: logger, apiKey: apiKey,
+                                       staticDirectory: staticDirectory)
             }
             promise.futureResult.whenComplete { result in
-                let (status, responseDict): (Int, [String: Any])
+                let response: RouteResponse
                 switch result {
                 case .success(let val):
-                    (status, responseDict) = val
+                    response = val
                 case .failure(let error):
-                    (status, responseDict) = (500, ["error": error.localizedDescription])
+                    response = .json(500, ["error": error.localizedDescription])
                 }
 
-                let responseData = (try? JSONSerialization.data(withJSONObject: responseDict, options: .prettyPrinted)) ?? Data()
-                self.sendResponse(context: context, status: HTTPResponseStatus(statusCode: status), body: responseData)
+                switch response {
+                case .json(let status, let responseDict):
+                    let responseData = (try? JSONSerialization.data(withJSONObject: responseDict, options: .prettyPrinted)) ?? Data()
+                    self.sendResponse(context: context, status: HTTPResponseStatus(statusCode: status), body: responseData, contentType: "application/json")
+                case .file(let data, let contentType):
+                    self.sendResponse(context: context, status: .ok, body: data, contentType: contentType)
+                case .notFound:
+                    let responseData = (try? JSONSerialization.data(withJSONObject: ["error": "Not found"], options: .prettyPrinted)) ?? Data()
+                    self.sendResponse(context: context, status: .notFound, body: responseData, contentType: "application/json")
+                }
             }
         }
     }
@@ -137,15 +159,16 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
 
     private static func handleRoute(
         method: HTTPMethod, path: String, body: Data?, headers: HTTPHeaders,
-        daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger, apiKey: String?
-    ) async -> (Int, [String: Any]) {
+        daemon: TriviaGenDaemon, triviaDB: TriviaDatabase?, logger: Logger, apiKey: String?,
+        staticDirectory: String?
+    ) async -> RouteResponse {
 
         switch (method, path) {
 
         // MARK: - Public GET endpoints
 
         case (.GET, "/health"):
-            return (200, ["ok": true])
+            return .json(200, ["ok": true])
 
         case (.GET, "/metrics"):
             var metrics: [[String: Any]] = []
@@ -211,7 +234,7 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                 }
             }
 
-            return (200, ["metrics": metrics])
+            return .json(200, ["metrics": metrics])
 
         case (.GET, "/status"):
             let stats = await daemon.getExportedStats()
@@ -219,25 +242,25 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             encoder.dateEncodingStrategy = .iso8601
             if let data = try? encoder.encode(stats),
                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                return (200, dict)
+                return .json(200, dict)
             }
-            return (200, ["state": await daemon.state.stringValue])
+            return .json(200, ["state": await daemon.state.stringValue])
 
         case (.GET, "/categories"):
             guard let db = triviaDB else {
-                return (503, ["error": "No SQLite database configured"])
+                return .json(503, ["error": "No SQLite database configured"])
             }
             do {
                 let cats = try db.allCategories()
                 let list = cats.map { ["name": $0.name, "pic": $0.pic, "count": $0.count] as [String: Any] }
-                return (200, ["categories": list, "total": cats.count])
+                return .json(200, ["categories": list, "total": cats.count])
             } catch {
-                return (500, ["error": error.localizedDescription])
+                return .json(500, ["error": error.localizedDescription])
             }
 
         case (.GET, "/gamedata"):
             guard let db = triviaDB else {
-                return (503, ["error": "No SQLite database configured"])
+                return .json(503, ["error": "No SQLite database configured"])
             }
             do {
                 let questions = try db.allQuestions()
@@ -263,26 +286,26 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 if let data = try? encoder.encode(output),
                    let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    return (200, dict)
+                    return .json(200, dict)
                 }
-                return (500, ["error": "Failed to encode game data"])
+                return .json(500, ["error": "Failed to encode game data"])
             } catch {
-                return (500, ["error": error.localizedDescription])
+                return .json(500, ["error": error.localizedDescription])
             }
 
         // MARK: - Protected POST endpoints (require Bearer token if CONTROL_API_KEY is set)
 
         case (.POST, "/harvest"):
             guard isAuthorized(headers: headers, apiKey: apiKey) else {
-                return (401, ["error": "Unauthorized — Bearer token required"])
+                return .json(401, ["error": "Unauthorized — Bearer token required"])
             }
             guard let body = body,
                   let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                   let categories = json["categories"] as? [String] else {
-                return (400, ["error": "Request body must include 'categories' array"])
+                return .json(400, ["error": "Request body must include 'categories' array"])
             }
             guard !categories.isEmpty else {
-                return (400, ["error": "'categories' array must not be empty"])
+                return .json(400, ["error": "'categories' array must not be empty"])
             }
             let rawCount = json["count"] as? Int ?? 50
             let count = max(1, min(rawCount, 1000))
@@ -297,48 +320,48 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                     logger.info("Harvest results will be available in next daemon cycle output")
                 }
             }
-            return (202, ["accepted": true, "id": String(harvestId), "categories": categories, "count": count])
+            return .json(202, ["accepted": true, "id": String(harvestId), "categories": categories, "count": count])
 
         case (.POST, "/pause"):
             guard isAuthorized(headers: headers, apiKey: apiKey) else {
-                return (401, ["error": "Unauthorized — Bearer token required"])
+                return .json(401, ["error": "Unauthorized — Bearer token required"])
             }
             await daemon.pause()
-            return (200, ["state": "paused"])
+            return .json(200, ["state": "paused"])
 
         case (.POST, "/resume"):
             guard isAuthorized(headers: headers, apiKey: apiKey) else {
-                return (401, ["error": "Unauthorized — Bearer token required"])
+                return .json(401, ["error": "Unauthorized — Bearer token required"])
             }
             await daemon.resume()
-            return (200, ["state": "running"])
+            return .json(200, ["state": "running"])
 
         case (.POST, "/stop"):
             guard isAuthorized(headers: headers, apiKey: apiKey) else {
-                return (401, ["error": "Unauthorized — Bearer token required"])
+                return .json(401, ["error": "Unauthorized — Bearer token required"])
             }
             // Schedule stop after responding
             Task {
                 try? await Task.sleep(nanoseconds: 100_000_000) // 100ms delay for response
                 await daemon.stop()
             }
-            return (200, ["state": "stopping"])
+            return .json(200, ["state": "stopping"])
 
         case (.POST, "/import"):
             guard isAuthorized(headers: headers, apiKey: apiKey) else {
-                return (401, ["error": "Unauthorized — Bearer token required"])
+                return .json(401, ["error": "Unauthorized — Bearer token required"])
             }
             guard let db = triviaDB else {
-                return (503, ["error": "No SQLite database configured"])
+                return .json(503, ["error": "No SQLite database configured"])
             }
             guard let body = body,
                   let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                   let filePath = json["file"] as? String else {
-                return (400, ["error": "Request body must include 'file' path"])
+                return .json(400, ["error": "Request body must include 'file' path"])
             }
 
             guard FileManager.default.fileExists(atPath: filePath) else {
-                return (404, ["error": "File not found: \(filePath)"])
+                return .json(404, ["error": "File not found: \(filePath)"])
             }
 
             do {
@@ -360,19 +383,78 @@ private final class ControlHTTPHandler: ChannelInboundHandler, @unchecked Sendab
                     case .duplicate: duplicates += 1
                     }
                 }
-                return (200, ["inserted": inserted, "duplicates": duplicates, "total": questions.count])
+                return .json(200, ["inserted": inserted, "duplicates": duplicates, "total": questions.count])
             } catch {
-                return (500, ["error": "Import failed: \(error.localizedDescription)"])
+                return .json(500, ["error": "Import failed: \(error.localizedDescription)"])
             }
 
         default:
-            return (404, ["error": "Not found: \(path)"])
+            // Try serving static files if a static directory is configured
+            if method == .GET, let staticDir = staticDirectory {
+                return serveStaticFile(path: path, from: staticDir)
+            }
+            return .notFound
         }
     }
 
-    private func sendResponse(context: ChannelHandlerContext, status: HTTPResponseStatus, body: Data) {
+    // MARK: - Static File Serving
+
+    private static let contentTypeMap: [String: String] = [
+        ".html": "text/html",
+        ".js": "application/javascript",
+        ".css": "text/css",
+        ".svg": "image/svg+xml",
+        ".json": "application/json",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".ico": "image/x-icon",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".map": "application/json",
+        ".txt": "text/plain",
+    ]
+
+    private static func serveStaticFile(path: String, from staticDir: String) -> RouteResponse {
+        // Normalize: strip leading slash
+        var relativePath = path
+        if relativePath.hasPrefix("/") {
+            relativePath = String(relativePath.dropFirst())
+        }
+
+        // Security: prevent directory traversal
+        guard !relativePath.contains("..") else {
+            return .notFound
+        }
+
+        let fm = FileManager.default
+
+        // If path has no file extension, serve index.html (SPA fallback)
+        let ext = (relativePath as NSString).pathExtension
+        if ext.isEmpty {
+            let indexPath = (staticDir as NSString).appendingPathComponent("index.html")
+            if let data = fm.contents(atPath: indexPath) {
+                return .file(data, "text/html")
+            }
+            return .notFound
+        }
+
+        // Resolve file path
+        let filePath = (staticDir as NSString).appendingPathComponent(relativePath)
+        guard let data = fm.contents(atPath: filePath) else {
+            return .notFound
+        }
+
+        let dotExt = ".\(ext)"
+        let contentType = contentTypeMap[dotExt] ?? "application/octet-stream"
+        return .file(data, contentType)
+    }
+
+    private func sendResponse(context: ChannelHandlerContext, status: HTTPResponseStatus, body: Data, contentType: String = "application/json") {
         var headers = HTTPHeaders()
-        headers.add(name: "Content-Type", value: "application/json")
+        headers.add(name: "Content-Type", value: contentType)
         headers.add(name: "Content-Length", value: "\(body.count)")
         headers.add(name: "Connection", value: "close")
         // CORS headers for studio web app
