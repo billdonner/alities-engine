@@ -92,10 +92,9 @@ struct RunCommand: AsyncParsableCommand {
                 try await pgService.ensureHintColumn()
                 dbService = pgService
             } catch {
-                if outputFile != nil {
-                    logger.warning("PostgreSQL unavailable, falling back to file-only mode: \(error.localizedDescription)")
-                } else {
-                    throw error
+                logger.warning("PostgreSQL unavailable: \(error.localizedDescription)")
+                if outputFile == nil {
+                    logger.warning("Running without database — only health check and static files will work")
                 }
             }
         }
