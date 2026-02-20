@@ -5,7 +5,7 @@ COPY studio/ ./
 RUN npm ci && npm run build
 
 # Stage 2: Build engine
-FROM swift:6.0-jammy AS builder
+FROM swift:6.0-noble AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY Package.swift Package.resolved ./
@@ -14,7 +14,7 @@ COPY Tests/ Tests/
 RUN swift build -c release --static-swift-stdlib
 
 # Stage 3: Runtime
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-0 \
     ca-certificates \
