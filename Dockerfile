@@ -4,13 +4,15 @@ WORKDIR /studio
 COPY studio/ ./
 RUN npm ci && npm run build
 
-# Stage 2: Build SQLite with snapshot support (Ubuntu's default build lacks it)
+# Stage 2: Build SQLite with snapshot support
 FROM ubuntu:24.04 AS sqlite-builder
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential wget ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN wget -q https://www.sqlite.org/2024/sqlite-autoconf-3450100.tar.gz && \
-    tar xzf sqlite-autoconf-3450100.tar.gz && \
-    cd sqlite-autoconf-3450100 && \
-    CFLAGS="-DSQLITE_ENABLE_SNAPSHOT -O2" ./configure --prefix=/usr/local && \
+RUN apt-get update && apt-get install -y --no-install-recommends wget gcc make libc6-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /sqlite
+RUN wget -q https://www.sqlite.org/2024/sqlite-autoconf-3450300.tar.gz && \
+    tar xzf sqlite-autoconf-3450300.tar.gz && \
+    cd sqlite-autoconf-3450300 && \
+    CFLAGS="-DSQLITE_ENABLE_SNAPSHOT -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1 -O2" \
+    ./configure --prefix=/usr/local && \
     make -j$(nproc) && make install
 
 # Stage 3: Build engine
@@ -23,7 +25,7 @@ WORKDIR /app
 COPY Package.swift Package.resolved ./
 COPY Sources/ Sources/
 COPY Tests/ Tests/
-RUN PKG_CONFIG_PATH=/usr/local/lib/pkgconfig swift build -c release
+RUN swift build -c release --static-swift-stdlib
 
 # Stage 4: Runtime
 FROM ubuntu:24.04
