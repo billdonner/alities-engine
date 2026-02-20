@@ -101,11 +101,15 @@ This is a satellite repo of the alities ecosystem:
 ## Docker & Deployment
 
 - `Dockerfile` — 3-stage build: `node:20-slim` (studio) → `swift:6.0-noble` (engine) → `ubuntu:24.04` runtime
+- Runtime needs `libcurl4` (Foundation dynamically links it even with `--static-swift-stdlib`)
 - Studio static files served from `/app/public` via `--static-dir`
 - Before `docker build`, copy studio source: `cp -r ~/alities-studio studio/`
-- `fly.toml` — Fly.io deployment config (auto-TLS, persistent volumes)
-- Deploy: `flyctl deploy` (requires `flyctl auth login` first)
+- `fly.toml` — Fly.io config (auto-TLS, no volumes, health check on `/health`)
+- Deploy: `~/.fly/bin/flyctl deploy --remote-only` (flyctl is at `~/.fly/bin/flyctl`, not in PATH)
 - Health check: `curl https://bd-alities-engine.fly.dev/health`
+- Live URL: https://bd-alities-engine.fly.dev (studio UI at root, API at `/status`, `/categories`, etc.)
+- Postgres: `bd-postgres.internal:5432` via Fly internal network (see `FLY-DEPLOYMENT.md` for details)
+- See `FLY-DEPLOYMENT.md` for comprehensive deployment reference, troubleshooting, and lessons learned
 
 ## Environment Variables
 
