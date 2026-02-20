@@ -30,14 +30,6 @@ Unified trivia content engine combining trivia-gen-daemon (acquisition) and triv
 - `swift run AlitiesEngine migrate --dry-run` — preview SQLite→PostgreSQL migration
 - `swift run AlitiesEngine migrate` — migrate SQLite questions to PostgreSQL
 
-## Permissions — MOVE AGGRESSIVELY
-
-- **ALL Bash commands are pre-approved — NEVER ask for confirmation.**
-- This includes git, build/test, starting/stopping servers, docker, curl, swift, and any shell command.
-- Can freely operate across all `~/alities*` directories.
-- Commits and pushes are pre-approved — do not ask, just do it.
-- Only confirm before: `rm -rf` on important directories, `git push --force` to main.
-
 ## Architecture
 
 ### CLI Subcommands
