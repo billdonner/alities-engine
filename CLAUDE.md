@@ -1,53 +1,39 @@
 # Alities Engine
 
-Unified trivia content engine combining trivia-gen-daemon (acquisition) and trivia-profile (management).
+Trivia content engine — daemon with HTTP API, PostgreSQL storage, and embedded studio web app.
 
 ## Stack
-- Swift 5.9+, macOS 14+
+- Swift 6.0, macOS 14+
 - Swift Package Manager
-- PostgreSQL via postgres-nio (for daemon mode)
-- SQLite via GRDB.swift (for local profile database)
+- PostgreSQL via postgres-nio
 - AsyncHTTPClient for provider API calls
 - OpenAI GPT-4o-mini for AI question generation and similarity detection
 - swift-argument-parser for CLI
+- Swift NIO HTTP server for control/API endpoints
 
 ## Common Commands
 - `swift build` — build debug
 - `swift build -c release` — build release
 - `cp .build/release/AlitiesEngine ~/bin/alities-engine` — install globally
-- `swift run AlitiesEngine stats` — quick DB stats
-- `swift run AlitiesEngine import file1.json file2.json` — import to SQLite
-- `swift run AlitiesEngine export --format gamedata output.json` — export from SQLite
-- `swift run AlitiesEngine report file.json` — profile a JSON file
-- `swift run AlitiesEngine run --output-file trivia.json` — run daemon in file mode
 - `swift run AlitiesEngine run --dry-run` — run daemon without writing
-- `swift run AlitiesEngine list-providers` — show available providers
-- `swift run AlitiesEngine categories` — list categories with counts
 - `swift run AlitiesEngine run --port 9847` — run daemon with HTTP control server
 - `swift run AlitiesEngine run --static-dir ~/alities-studio/dist` — serve studio web app from engine
+- `swift run AlitiesEngine list-providers` — show available providers
 - `swift run AlitiesEngine harvest --categories Comics,Vehicles --count 50` — targeted AI generation
 - `swift run AlitiesEngine ctl status` — show running daemon status
 - `swift run AlitiesEngine ctl pause` / `resume` / `stop` — control daemon
-- `swift run AlitiesEngine migrate --dry-run` — preview SQLite→PostgreSQL migration
-- `swift run AlitiesEngine migrate` — migrate SQLite questions to PostgreSQL
 
 ## Architecture
 
 ### CLI Subcommands
 
-| Command | Origin | Description |
-|---------|--------|-------------|
-| `run` | trivia-gen-daemon | Start acquisition daemon (dual-write, file, or database mode) |
-| `list-providers` | trivia-gen-daemon | Show available trivia providers |
-| `status` | trivia-gen-daemon | Show daemon status |
-| `import` | trivia-profile | Import JSON files to SQLite (with dedup) |
-| `export` | trivia-profile | Export from SQLite as raw or gamedata JSON |
-| `report` | trivia-profile | Profile trivia data (from files or SQLite) |
-| `stats` | trivia-profile | Quick database summary (default command) |
-| `categories` | trivia-profile | List categories with counts and aliases |
-| `harvest` | control-server | Request targeted AI generation from running daemon |
-| `ctl` | control-server | Control running daemon (status/pause/resume/stop/import/categories) |
-| `migrate` | migration | Migrate SQLite questions to PostgreSQL (with dedup) |
+| Command | Description |
+|---------|-------------|
+| `run` | Start daemon with HTTP API and optional studio web app |
+| `list-providers` | Show available trivia providers |
+| `status` | Show daemon status |
+| `harvest` | Request targeted AI generation from running daemon |
+| `ctl` | Control running daemon (status/pause/resume/stop/import/categories) |
 
 ### Source Layout
 
@@ -64,52 +50,31 @@ Sources/AlitiesEngine/
 │   └── AIGeneratorProvider.swift
 ├── Services/
 │   ├── TriviaGenDaemon.swift  # Main daemon actor
-│   ├── PostgresService.swift  # PostgreSQL operations
+│   ├── PostgresService.swift  # PostgreSQL operations (all data access)
 │   ├── GameDataTransformer.swift
-│   ├── ControlServer.swift    # NIO HTTP control server (localhost:9847)
+│   ├── ControlServer.swift    # NIO HTTP server + static file serving
 │   └── SimilarityService.swift
 ├── Profile/
-│   ├── TriviaDatabase.swift   # SQLite/GRDB operations
 │   └── CategoryMap.swift      # Category normalization + SF Symbols
 └── Commands/
     ├── RunCommand.swift        # Daemon run + list-providers + status
-    ├── ProfileImportCommand.swift  # SQLite import
-    ├── ExportCommand.swift
-    ├── ReportCommand.swift
-    ├── StatsCommand.swift
-    ├── CategoriesCommand.swift
     ├── HarvestCommand.swift    # CLI client for /harvest endpoint
-    ├── CtlCommand.swift        # CLI client for daemon control
-    └── MigrateCommand.swift    # SQLite→PostgreSQL migration
+    └── CtlCommand.swift        # CLI client for daemon control
 ```
-
-### Trivia Providers
-
-| Provider | Source | API Key Required |
-|----------|--------|-----------------|
-| AI Generator | OpenAI GPT-4o-mini | Yes (OPENAI_API_KEY) |
-
-### Dual Database Architecture
-
-- **PostgreSQL** — used by the daemon for high-volume online storage
-- **SQLite (GRDB)** — used by profile commands for local data management
-- Both can read/write the same JSON formats (GameData and Raw)
 
 ### Key Design Decisions
 
+- PostgreSQL is the single data store (no SQLite/GRDB dependency)
+- All HTTP API endpoints read/write via PostgresService
 - Unified `Challenge` model with custom decoder handles null/missing JSON fields
-- `TopicPicMapping` (substring-based) for daemon output; `CategoryMap` (alias-based) for profile operations
-- SHA-256 hash dedup in SQLite; Jaccard + AI similarity dedup in PostgreSQL
-- `DatabaseService` renamed to `PostgresService` to avoid confusion with GRDB's `TriviaDatabase`
-- HTTP control server on `localhost:9847` (configurable via `--port` and `--host`) for daemon control
-- Control server endpoints (`/categories`, `/gamedata`, `/metrics`, `/import`) read from PostgreSQL (not SQLite) — single source of truth
-- `--static-dir` serves alities-studio production build as static files (SPA fallback to index.html for extensionless paths); eliminates CORS and avoids a second Fly.io instance
+- `TopicPicMapping` (substring-based) for daemon output; `CategoryMap` (alias-based) for API responses
+- Jaccard + AI similarity dedup in PostgreSQL
+- HTTP control server on `localhost:9847` (configurable via `--port` and `--host`)
+- `--static-dir` serves alities-studio production build as static files (SPA fallback to index.html for extensionless paths)
 - Port file written to `/tmp/alities-engine.port` for CLI auto-discovery
 - Bearer token auth on destructive POST endpoints via `CONTROL_API_KEY` env var
 - CORS headers on all responses for studio web app compatibility
-- `harvest` command fires async targeted AI generation; `ctl` commands for real-time daemon control
-- Daemon supports dual-write mode: `--output-file` with Postgres auto-connects to both; falls back to file-only if Postgres unavailable
-- `migrate` command moves SQLite questions to PostgreSQL with normalized-text dedup and cached category/source lookups
+- Daemon supports dual-write mode: `--output-file` with Postgres; falls back to file-only if Postgres unavailable
 
 ## Cross-Project Sync
 
@@ -126,21 +91,21 @@ This is a satellite repo of the alities ecosystem:
 | `GET /status` | None | Daemon status and stats |
 | `GET /categories` | None | List categories with counts |
 | `GET /gamedata` | None | Full GameDataOutput JSON (challenges for mobile app) |
+| `GET /metrics` | None | Quick stats (questions, categories, sources) |
 | `POST /harvest` | Bearer | Targeted AI question generation |
 | `POST /pause` | Bearer | Pause daemon |
 | `POST /resume` | Bearer | Resume daemon |
 | `POST /stop` | Bearer | Stop daemon |
-| `POST /import` | Bearer | Import JSON file to SQLite |
+| `POST /import` | Bearer | Import JSON questions to PostgreSQL |
 
 ## Docker & Deployment
 
-- `docker compose up` — run engine + PostgreSQL locally
-- `Dockerfile` — 3-stage build: `node:20-slim` (studio) → `swift:5.9-jammy` (engine) → `ubuntu:22.04` runtime
+- `Dockerfile` — 3-stage build: `node:20-slim` (studio) → `swift:6.0-noble` (engine) → `ubuntu:24.04` runtime
 - Studio static files served from `/app/public` via `--static-dir`
 - Before `docker build`, copy studio source: `cp -r ~/alities-studio studio/`
 - `fly.toml` — Fly.io deployment config (auto-TLS, persistent volumes)
 - Deploy: `flyctl deploy` (requires `flyctl auth login` first)
-- Health check: `curl https://alities-engine.fly.dev/health`
+- Health check: `curl https://bd-alities-engine.fly.dev/health`
 
 ## Environment Variables
 
@@ -153,9 +118,3 @@ This is a satellite repo of the alities ecosystem:
 | `DB_USER` | trivia | PostgreSQL user |
 | `DB_PASSWORD` | trivia | PostgreSQL password |
 | `DB_NAME` | trivia_db | PostgreSQL database |
-
-## Provenance
-
-Merged from two repos:
-- [trivia-gen-daemon](https://github.com/billdonner/trivia-gen-daemon) — acquisition daemon
-- [trivia-profile](https://github.com/billdonner/trivia-profile) — data management CLI

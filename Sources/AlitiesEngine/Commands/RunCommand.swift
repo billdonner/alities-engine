@@ -55,9 +55,6 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Control server bind address")
     var host: String = "127.0.0.1"
 
-    @Option(name: .long, help: "SQLite database path (for local CLI commands only)")
-    var db: String = "~/trivia.db"
-
     @Option(name: .long, help: "Directory for static web files (e.g. alities-studio dist)")
     var staticDir: String?
 

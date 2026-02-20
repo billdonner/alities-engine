@@ -5,24 +5,14 @@ import ArgumentParser
 struct AlitiesEngineCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "alities-engine",
-        abstract: "Alities trivia engine — generate, import, profile, and export trivia content",
+        abstract: "Alities trivia engine — daemon with HTTP API and studio web app",
         subcommands: [
-            // Generator commands (from trivia-gen-daemon)
             RunCommand.self,
             ListProvidersCommand.self,
             StatusCommand.self,
-            // Profile commands (from trivia-profile)
-            ProfileImportCommand.self,
-            ExportCommand.self,
-            ReportCommand.self,
-            StatsCommand.self,
-            CategoriesCommand.self,
-            // Control commands (HTTP client to running daemon)
             HarvestCommand.self,
             CtlCommand.self,
-            // Migration
-            MigrateCommand.self,
         ],
-        defaultSubcommand: StatsCommand.self
+        defaultSubcommand: StatusCommand.self
     )
 }

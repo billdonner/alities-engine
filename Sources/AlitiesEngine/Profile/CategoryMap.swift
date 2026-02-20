@@ -78,12 +78,4 @@ struct CategoryMap {
         canonicalToSymbol[canonical] ?? "questionmark.circle"
     }
 
-    static func seedDatabase(_ db: TriviaDatabase) throws {
-        for (canonical, symbol) in canonicalToSymbol {
-            try db.getOrCreateCategory(name: canonical, pic: symbol)
-        }
-        for (alias, canonical) in aliasToCanonical {
-            try db.addAlias(alias, forCategory: canonical)
-        }
-    }
 }
